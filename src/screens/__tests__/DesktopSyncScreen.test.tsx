@@ -32,6 +32,9 @@ beforeEach(() => {
   (AuthService.getTokenExpiresAt as jest.Mock).mockReturnValue(Date.now() + 60 * 60 * 1000);
   (getDeviceId as jest.Mock).mockResolvedValue('device-abc');
   mockCheckAndRequestPermission.mockResolvedValue(true);
+  // The shared recovery keeps the last applied relay token in MODULE state
+  // (app-wide, not per screen) — each test starts from a cold app.
+  resetRelayAuthRecoveryForTests();
 });
 
 jest.mock('react-i18next', () => ({
@@ -200,6 +203,7 @@ import { DesktopSyncScreen } from '../settings/DesktopSyncScreen';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 import AuthService from '../../services/auth/AuthService';
 import { getDeviceId } from '../../services/cloud/DeviceIdProvider';
+import { resetRelayAuthRecoveryForTests } from '../../services/sync/relayAuthRecovery';
 import { setAppVariantForTests } from '../../config/appVariant';
 
 const mockStatus = engineApiClient.getSyncClientStatus as jest.Mock;

@@ -35,6 +35,7 @@
   "pendingWritesWarning": "{{count}} buffered change(s) have not reached the desktop yet. They stay on this device and sync on reconnect.",
   "authNeededBanner": "Refreshing your cloud session — cloud sync needs a fresh sign-in token.",
   "authSignInExpiredBanner": "Cloud sign-in expired — sign in again to resume cloud sync.",
+  "cloudSignInExpired": "Cloud sign-in expired",
   "authRecoveryFailedBanner": "Couldn't refresh your cloud sign-in automatically. Cloud sync stays paused — sign in again if this keeps happening.",
   "authSignInButton": "Sign in",
   "quotaExceededBanner": "Cloud sync is paused — your plan's sync quota is full. Free up space in the portal to resume.",

@@ -16,6 +16,7 @@ import {attachE2EEngineOverride} from '../services/engine/e2eEngineOverride';
 import {attachOutreachNotifications} from '../services/notifications/OutreachNotificationService';
 import {wireEngineVersionProbe} from '../services/engine/engineVersionProbe';
 import {refreshUpdates, attachUpdateForegroundChecks} from '../services/updates/UpdateAvailableService';
+import {attachRelayAuthSelfHeal} from '../services/sync/relayAuthForegroundHeal';
 import {createLogger} from '../utils/logger';
 
 const log = createLogger('[DatabaseContext]');
@@ -84,6 +85,13 @@ export function DatabaseProvider({children}: DatabaseProviderProps) {
       // Owner ruling 2026-10-17: no TTL + foreground checks for the fast
       // dev-release loop — re-check on every cold start and app foreground.
       attachUpdateForegroundChecks();
+
+      // 2026-10-23 incident: the engine's relay token (the account PASETO) is
+      // short-lived, so an overnight expiry left cloud sync dead until the user
+      // opened Desktop Sync. Check ONCE per foreground and heal silently
+      // through the shared verify-before-PUT recovery. Never stops/restarts the
+      // engine; entities and providers are untouched.
+      attachRelayAuthSelfHeal();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       log.error('App data layer initialization failed:', errorMessage);

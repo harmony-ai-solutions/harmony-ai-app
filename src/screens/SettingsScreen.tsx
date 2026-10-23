@@ -19,6 +19,7 @@ import {
   onEngineVersionStateChange,
 } from '../services/engine/EngineService';
 import { engineApiClient } from '../services/engine/EngineApiClient';
+import { needsRelayAuth } from '../services/sync/relayAuthRecovery';
 import {
   ensurePersonaVoiceConfig,
   resolvePersonaVoice,
@@ -98,11 +99,18 @@ export const SettingsScreen: React.FC = () => {
     try {
       const status = await engineApiClient.getSyncClientStatus();
       setDesktopSyncState(
-        status.config.enabled
-          ? status.local_authoritative
-            ? tDesktopSync('authorityThisDevice')
-            : tDesktopSync('authorityPeer')
-          : t('off'),
+        // Honest auth surface (2026-10-23): when the engine reports the relay
+        // rejected our bearer, an authority label is a lie — the transport is
+        // paused until the token is refreshed. The app-wide foreground
+        // self-heal fixes it silently; until it does (or when the sign-in is
+        // genuinely gone), this chip says so.
+        needsRelayAuth(status)
+          ? tDesktopSync('cloudSignInExpired')
+          : status.config.enabled
+            ? status.local_authoritative
+              ? tDesktopSync('authorityThisDevice')
+              : tDesktopSync('authorityPeer')
+            : t('off'),
       );
     } catch {
       // Engine unavailable / sync not configured yet — omit the chip.

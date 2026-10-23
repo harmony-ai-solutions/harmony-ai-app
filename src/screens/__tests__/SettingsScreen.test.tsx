@@ -269,6 +269,53 @@ describe('SettingsScreen — trailing value chips', () => {
   });
 });
 
+describe('SettingsScreen — honest cloud-auth chip (2026-10-23 incident)', () => {
+  it('says the cloud sign-in expired instead of naming an authority', async () => {
+    mockGetSyncStatus.mockResolvedValue({
+      state: 'auth_needed',
+      relay: null,
+      config: { enabled: true, transport: 'relay' },
+      local_authoritative: false,
+    });
+
+    const utils = await renderScreen();
+
+    await waitFor(() =>
+      expect(utils.getByTestId('value-desktopSync').props.children).toBe('cloudSignInExpired'),
+    );
+  });
+
+  it('also reports it when only the relay bridge flags auth_needed', async () => {
+    mockGetSyncStatus.mockResolvedValue({
+      state: 'backoff',
+      relay: { auth_needed: true },
+      config: { enabled: true, transport: 'relay' },
+      local_authoritative: false,
+    });
+
+    const utils = await renderScreen();
+
+    await waitFor(() =>
+      expect(utils.getByTestId('value-desktopSync').props.children).toBe('cloudSignInExpired'),
+    );
+  });
+
+  it('keeps the authority label when the relay is healthy', async () => {
+    mockGetSyncStatus.mockResolvedValue({
+      state: 'syncing',
+      relay: { auth_needed: false },
+      config: { enabled: true, transport: 'relay' },
+      local_authoritative: false,
+    });
+
+    const utils = await renderScreen();
+
+    await waitFor(() =>
+      expect(utils.getByTestId('value-desktopSync').props.children).toBe('authorityPeer'),
+    );
+  });
+});
+
 describe('SettingsScreen — navigation', () => {
   it('Personas navigates to the dedicated list screen', async () => {
     const utils = await renderScreen();
