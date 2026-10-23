@@ -195,6 +195,13 @@ export interface EngineLifecycleController {
   getState(): EngineLifecycleState;
   /** Ensure the engine is started (idempotent; reuses a live connection). */
   ensureStarted(): Promise<void>;
+  /**
+   * Manually stop the engine (Settings → Engine status). Dispatches the same
+   * `stopRequested` event a background stop uses, so the controller tracks the
+   * stop (`stopping` → `stopped`). Resolves once the host stop has settled;
+   * no-op when already stopped.
+   */
+  stopNow(): Promise<void>;
   /** Transition AppState (exposed for tests; wired to RN AppState by default). */
   handleAppState(value: AppStateStatus): void;
   /** Fire the grace timer (exposed for tests). */
@@ -235,6 +242,7 @@ export function createEngineLifecycle(deps: EngineLifecycleDeps = {}): EngineLif
   let state = initialEngineLifecycleState(isActive(appStateSource.currentState));
   let timerHandle: any = null;
   let inFlight: Promise<void> | null = null;
+  let stopInFlight: Promise<void> | null = null;
 
   const publish = () => {
     deps.onStateChange?.(state);
@@ -279,14 +287,33 @@ export function createEngineLifecycle(deps: EngineLifecycleDeps = {}): EngineLif
     return inFlight;
   };
 
-  const performStop = async (): Promise<void> => {
-    try {
-      await stop();
-    } catch (e) {
-      log.warn('engine stop failed:', e instanceof Error ? e.message : String(e));
-    } finally {
-      apply({ type: 'stopped' });
-    }
+  const performStop = (): Promise<void> => {
+    // One host stop at a time: a manual stop and a grace-timer stop must never
+    // race each other (the second would call the host stop on a dead engine).
+    if (stopInFlight) return stopInFlight;
+    stopInFlight = (async () => {
+      try {
+        await stop();
+      } catch (e) {
+        log.warn('engine stop failed:', e instanceof Error ? e.message : String(e));
+      } finally {
+        apply({ type: 'stopped' });
+        stopInFlight = null;
+      }
+    })();
+    return stopInFlight;
+  };
+
+  /**
+   * Manual stop (Settings → Engine status). Uses the reducer's EXISTING
+   * `stopRequested` event — the controller publishes `stopping`, stops the
+   * host, then publishes `stopped`, exactly like the background path.
+   */
+  const stopNow = (): Promise<void> => {
+    if (stopInFlight) return stopInFlight;
+    if (state.status === 'stopped') return Promise.resolve();
+    apply({ type: 'stopRequested' });
+    return stopInFlight ?? Promise.resolve();
   };
 
   const handleTimer = (): void => {
@@ -309,6 +336,7 @@ export function createEngineLifecycle(deps: EngineLifecycleDeps = {}): EngineLif
   return {
     getState: () => state,
     ensureStarted,
+    stopNow,
     handleAppState,
     handleTimer,
     dispose: () => {
@@ -334,6 +362,18 @@ export function attachEngineLifecycle(deps: EngineLifecycleDeps = {}): EngineLif
   attached = createEngineLifecycle(deps);
   log.info(`Engine lifecycle attached (foregroundTier=${attached.getState().isForeground})`);
   return attached;
+}
+
+/**
+ * Request a manual engine stop from the UI (Settings → Engine status).
+ *
+ * Reuses the app-wide controller so the stop is tracked by the same state
+ * machine as a background stop (`stopRequested` → `stopping` → `stopped`);
+ * the next foreground start is then a normal `ensureStarted`. Falls back to
+ * {@link disconnectEngine} when no controller is attached (early boot/tests).
+ */
+export function requestEngineStop(): Promise<void> {
+  return attached ? attached.stopNow() : disconnectEngine();
 }
 
 /** Test-only: detach the singleton and reset it. */

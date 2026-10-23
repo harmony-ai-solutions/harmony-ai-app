@@ -14,6 +14,19 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
 
+/** Mutable platform the (mocked) RN Platform reports (set per test). */
+let mockPlatformOS: 'ios' | 'android' = 'ios';
+
+jest.mock('react-native/Libraries/Utilities/Platform', () => ({
+  __esModule: true,
+  default: {
+    get OS() {
+      return mockPlatformOS;
+    },
+    select: (obj: Record<string, any>) => obj[mockPlatformOS] ?? obj.default,
+  },
+}));
+
 /** Mutable state the mocked EngineService reads from (set per test). */
 const mockState: {
   connection: any;
@@ -36,6 +49,14 @@ jest.mock('../../../services/engine/EngineService', () => ({
   onEngineStatusChange: jest.fn(() => () => undefined),
   onEngineExitChange: jest.fn(() => () => undefined),
   onEngineVersionStateChange: jest.fn(() => () => undefined),
+  restartEngine: (...args: unknown[]) => (mockRestartEngine as jest.Mock)(...args),
+}));
+
+const mockRestartEngine = jest.fn(async () => ({ adminBaseUrl: 'http://127.0.0.1:28081' }));
+
+const mockRequestEngineStop = jest.fn(async () => undefined);
+jest.mock('../../../services/engine/EngineLifecycle', () => ({
+  requestEngineStop: (...args: unknown[]) => (mockRequestEngineStop as jest.Mock)(...args),
 }));
 
 const mockShareDiagnosticsReport = jest.fn(() => Promise.resolve('/mock/caches/report.txt'));
@@ -105,19 +126,24 @@ jest.mock('../../../utils/colorUtils', () => ({
   hexToRgba: (hex: string) => hex,
 }));
 
+import { Alert } from 'react-native';
 import { ENGINE_CONTRACT_VERSION } from '../../../services/engine/engineContract';
 import { EngineStatusScreen } from '../EngineStatusScreen';
 
 beforeEach(() => {
   cleanup();
   jest.clearAllMocks();
+  mockPlatformOS = 'ios';
   mockState.connection = null;
   mockState.status = null;
   mockState.lastExit = null;
   mockState.version = { engineVersion: null };
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  jest.restoreAllMocks();
+});
 
 const CONNECTION = {
   adminBaseUrl: 'http://127.0.0.1:28081',
@@ -204,5 +230,116 @@ describe('EngineStatusScreen', () => {
     await waitFor(() =>
       expect(mockShareDiagnosticsReport).toHaveBeenCalledWith({ entries: [], scope: 'full' }),
     );
+  });
+
+  // ── Lifecycle controls (restart / Android-only stop) ────────────────────
+
+  it('shows the restart row and hides the stop row on iOS', async () => {
+    await render(<EngineStatusScreen />);
+
+    expect(screen.getByTestId('engine-status-restart-button')).toBeTruthy();
+    expect(screen.getByText('restart')).toBeTruthy();
+    expect(screen.queryByTestId('engine-status-stop-button')).toBeNull();
+    expect(screen.queryByText('stop')).toBeNull();
+  });
+
+  it('shows the stop row with its hint on Android', async () => {
+    mockPlatformOS = 'android';
+    await render(<EngineStatusScreen />);
+
+    expect(screen.getByTestId('engine-status-stop-button')).toBeTruthy();
+    expect(screen.getByText('stop')).toBeTruthy();
+    expect(screen.getByText('stopHint')).toBeTruthy();
+  });
+
+  it('restarts immediately on press — no confirmation', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await render(<EngineStatusScreen />);
+
+    fireEvent.press(screen.getByTestId('engine-status-restart-button'));
+
+    await waitFor(() => expect(mockRestartEngine).toHaveBeenCalledTimes(1));
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(mockRequestEngineStop).not.toHaveBeenCalled();
+  });
+
+  it('asks once before stopping, then stops on confirm', async () => {
+    mockPlatformOS = 'android';
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await render(<EngineStatusScreen />);
+
+    fireEvent.press(screen.getByTestId('engine-status-stop-button'));
+
+    expect(mockRequestEngineStop).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+
+    const [title, body, buttons] = alertSpy.mock.calls[0] as [string, string, any[]];
+    expect(title).toBe('stopConfirmTitle');
+    expect(body).toBe('stopConfirmBody');
+
+    const confirm = buttons.find(button => button.style === 'destructive');
+    expect(confirm).toBeTruthy();
+    await confirm.onPress();
+
+    expect(mockRequestEngineStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing when the stop confirmation is cancelled', async () => {
+    mockPlatformOS = 'android';
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await render(<EngineStatusScreen />);
+
+    fireEvent.press(screen.getByTestId('engine-status-stop-button'));
+
+    const buttons = alertSpy.mock.calls[0][2] as any[];
+    const cancel = buttons.find(button => button.style === 'cancel');
+    expect(cancel).toBeTruthy();
+    cancel.onPress?.();
+    await Promise.resolve();
+
+    expect(mockRequestEngineStop).not.toHaveBeenCalled();
+    expect(mockRestartEngine).not.toHaveBeenCalled();
+  });
+
+  it.each(['starting', 'restarting'] as const)(
+    'disables both lifecycle rows while the engine is %s',
+    async status => {
+      mockPlatformOS = 'android';
+      mockState.status = status;
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      await render(<EngineStatusScreen />);
+
+      const restartRow = screen.getByTestId('engine-status-restart-button');
+      const stopRow = screen.getByTestId('engine-status-stop-button');
+      expect(restartRow.props.accessibilityState?.disabled).toBe(true);
+      expect(stopRow.props.accessibilityState?.disabled).toBe(true);
+
+      fireEvent.press(restartRow);
+      fireEvent.press(stopRow);
+      await Promise.resolve();
+
+      expect(mockRestartEngine).not.toHaveBeenCalled();
+      expect(alertSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('re-enables the lifecycle rows once the engine is ready', async () => {
+    mockPlatformOS = 'android';
+    mockState.connection = CONNECTION;
+    mockState.status = 'starting';
+    await render(<EngineStatusScreen />);
+    expect(
+      screen.getByTestId('engine-status-restart-button').props.accessibilityState?.disabled,
+    ).toBe(true);
+
+    // The observed status flips to ready (the screen already subscribes to it).
+    mockState.status = 'ready';
+    cleanup();
+    await render(<EngineStatusScreen />);
+
+    const restartRow = screen.getByTestId('engine-status-restart-button');
+    expect(restartRow.props.accessibilityState?.disabled).toBeFalsy();
+    fireEvent.press(restartRow);
+    await waitFor(() => expect(mockRestartEngine).toHaveBeenCalledTimes(1));
   });
 });

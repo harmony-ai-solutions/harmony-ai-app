@@ -46,6 +46,13 @@
     "contract": "Management contract"
   },
   "actionsSection": "Diagnostics",
+  "restart": "Restart engine",
+  "stop": "Stop engine",
+  "stopHint": "Until you open a chat again",
+  "stopConfirmTitle": "Stop the engine?",
+  "stopConfirmBody": "This stops the engine right away and ends anything it's doing, including active chats. It starts again when you open a chat.",
+  "stopConfirmAction": "Stop engine",
+  "stopConfirmCancel": "Cancel",
   "viewLogs": "View engine logs",
   "share": "Share diagnostics"
 }

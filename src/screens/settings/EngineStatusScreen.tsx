@@ -5,7 +5,10 @@
  * The app embeds the Soulbits Engine (an Android sidecar process / an iOS
  * in-process module). This screen answers the owner's question — "is the
  * engine running, and on which ports?" — and links to the existing log viewer
- * (`EngineLogScreen`, plan 7-11) plus a share-diagnostics action.
+ * (`EngineLogScreen`, plan 7-11) plus a share-diagnostics action. It also
+ * carries the two manual lifecycle controls (restart; Android-only stop), which
+ * reuse the app-wide `EngineService`/`EngineLifecycle` surfaces — no new status
+ * machinery lives here.
  *
  * Data sources (all reused, none invented):
  *   - connection + lifecycle status + last exit → `EngineService`
@@ -20,7 +23,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import DeviceInfo from 'react-native-device-info';
@@ -44,7 +47,9 @@ import {
   onEngineExitChange,
   onEngineStatusChange,
   onEngineVersionStateChange,
+  restartEngine,
 } from '../../services/engine/EngineService';
+import { requestEngineStop } from '../../services/engine/EngineLifecycle';
 import type { EngineConnection, EngineVersionState } from '../../services/engine/EngineService';
 import type { EngineExitInfo, EngineStatus } from '../../types/engineSidecar';
 import { shareDiagnosticsReport } from '../../services/diagnostics/shareDiagnostics';
@@ -135,6 +140,31 @@ export const EngineStatusScreen: React.FC = () => {
     }
   }, [sharing]);
 
+  // Restart uses the SAME deduped surface the boot gate uses. No confirmation:
+  // the engine is back in seconds and nothing is lost.
+  const restart = useCallback(async () => {
+    try {
+      await restartEngine();
+    } catch (err) {
+      log.warn('Engine restart failed:', err);
+    }
+  }, []);
+
+  // Stop is the one destructive-ish action: confirm once (it ends whatever the
+  // engine is doing), then dispatch the lifecycle's existing stop request.
+  const confirmStop = useCallback(() => {
+    Alert.alert(t('stopConfirmTitle'), t('stopConfirmBody'), [
+      { text: t('stopConfirmCancel'), style: 'cancel' },
+      {
+        text: t('stopConfirmAction'),
+        style: 'destructive',
+        onPress: () => {
+          void requestEngineStop().catch(err => log.warn('Engine stop failed:', err));
+        },
+      },
+    ]);
+  }, [t]);
+
   if (!theme) return null;
 
   const connected = connection !== null;
@@ -143,6 +173,9 @@ export const EngineStatusScreen: React.FC = () => {
   const displayStatus: EngineStatus | null = connected ? 'ready' : engineStatus;
   const meta = statusMeta(displayStatus, t, theme);
   const unknown = t('valueUnknown');
+  // The observed lifecycle already says whether an action is running; the rows
+  // simply reflect it (no detection of our own).
+  const engineBusy = engineStatus === 'starting' || engineStatus === 'restarting';
 
   const appVersion = safeAppVersion();
   const engineVersion = versionState.engineVersion ?? t('updates:about.unknown');
@@ -289,10 +322,36 @@ export const EngineStatusScreen: React.FC = () => {
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('actionsSection')} style={styles.sectionHeader} />
           <SettingsLinkRow
+            icon="refresh"
+            label={t('restart')}
+            onPress={() => void restart()}
+            theme={theme}
+            disabled={engineBusy}
+            loading={engineBusy}
+            testID="engine-status-restart-button"
+          />
+          {/* Android keeps the sidecar alive in the background, so a manual stop
+              needs an explicit control. On iOS the engine already stops when the
+              app is backgrounded — no row. */}
+          {Platform.OS === 'android' && (
+            <SettingsLinkRow
+              icon="stop-circle-outline"
+              label={t('stop')}
+              subtitle={t('stopHint')}
+              onPress={confirmStop}
+              theme={theme}
+              showSeparator
+              disabled={engineBusy}
+              loading={engineBusy}
+              testID="engine-status-stop-button"
+            />
+          )}
+          <SettingsLinkRow
             icon="text-box-search-outline"
             label={t('viewLogs')}
             onPress={() => navigation.navigate('EngineLog')}
             theme={theme}
+            showSeparator
           />
           <SettingsLinkRow
             icon="share-variant"

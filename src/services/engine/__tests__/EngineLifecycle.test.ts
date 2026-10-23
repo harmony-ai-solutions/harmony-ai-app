@@ -9,9 +9,12 @@ jest.mock('../../../utils/logger', () => ({
 import type { AppStateStatus } from 'react-native';
 import {
   ENGINE_BACKGROUND_GRACE_MS,
+  attachEngineLifecycle,
   createEngineLifecycle,
+  detachEngineLifecycleForTests,
   initialEngineLifecycleState,
   reduceEngineLifecycle,
+  requestEngineStop,
 } from '../EngineLifecycle';
 import type { EngineLifecyclePolicy } from '../EngineLifecycle';
 import type { EngineHost } from '../EngineHost';
@@ -232,5 +235,48 @@ describe('createEngineLifecycle', () => {
     expect(ctrl.getState().pendingStopAt).toBeNull();
     expect(stop).not.toHaveBeenCalled();
     ctrl.dispose();
+  });
+
+  it('stops on demand (stopRequested) and reports stopped', async () => {
+    const appState = fakeAppState('active');
+    const stop = jest.fn(async () => undefined);
+    const ctrl = createEngineLifecycle({
+      host: fakeHost(true),
+      start: async () => undefined,
+      stop,
+      appState,
+      timers: { setTimeout: () => 1, clearTimeout: () => undefined },
+    });
+    await ctrl.ensureStarted();
+    expect(ctrl.getState().status).toBe('ready');
+
+    await ctrl.stopNow();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(ctrl.getState().status).toBe('stopped');
+
+    // Idempotent: an already-stopped engine is not stopped again.
+    await ctrl.stopNow();
+    expect(stop).toHaveBeenCalledTimes(1);
+    ctrl.dispose();
+  });
+
+  it('requestEngineStop drives the attached controller', async () => {
+    const appState = fakeAppState('active');
+    const stop = jest.fn(async () => undefined);
+    const ctrl = attachEngineLifecycle({
+      host: fakeHost(true),
+      start: async () => undefined,
+      stop,
+      appState,
+      timers: { setTimeout: () => 1, clearTimeout: () => undefined },
+    });
+    try {
+      await ctrl.ensureStarted();
+      await requestEngineStop();
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(ctrl.getState().status).toBe('stopped');
+    } finally {
+      detachEngineLifecycleForTests();
+    }
   });
 });

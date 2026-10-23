@@ -11,12 +11,13 @@
  * Link rows may surface a short CURRENT VALUE via `value` (e.g. the active STT
  * model, a persona count, a sync authority). It renders as muted 12px text,
  * right-aligned, single-line, capped at ~45% of the row width, and always sits
- * before the optional badge and the chevron. `SettingsDetailRow` uses the same
- * read-only label/value language (without the chevron) for non-navigating
- * detail lines.
+ * before the optional badge and the chevron. A short expectation/hint can be
+ * surfaced as a muted second line under the label via `subtitle`.
+ * `SettingsDetailRow` uses the same read-only label/value language (without the
+ * chevron) for non-navigating detail lines.
  */
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Switch } from 'react-native-paper';
 import { ThemedText } from '../themed/ThemedText';
@@ -39,10 +40,17 @@ export interface SettingsRowProps {
   label: string;
   /** Optional short current value shown muted/right-aligned before the chevron. */
   value?: string;
+  /** Optional second line under the label (a short hint/expectation, muted). */
+  subtitle?: string;
   onPress?: () => void;
   theme: any;
   badge?: string;
   showSeparator?: boolean;
+  /** Dim the row and ignore presses (e.g. while the action is already running). */
+  disabled?: boolean;
+  /** Show a small spinner in the trailing slot instead of the chevron. */
+  loading?: boolean;
+  testID?: string;
 }
 
 /** Tappable row with chevron — used for navigation links. */
@@ -50,10 +58,14 @@ export const SettingsLinkRow: React.FC<SettingsRowProps> = ({
   icon,
   label,
   value,
+  subtitle,
   onPress,
   theme,
   badge,
   showSeparator,
+  disabled,
+  loading,
+  testID,
 }) => (
   <View>
     {showSeparator && (
@@ -61,12 +73,29 @@ export const SettingsLinkRow: React.FC<SettingsRowProps> = ({
         style={[styles.linkSeparator, { backgroundColor: hexToRgba(theme.colors.border.default, 0.3) }]}
       />
     )}
-    <TouchableOpacity style={styles.linkRow} onPress={() => {
-      hapticLightPress();
-      onPress?.();
-    }} activeOpacity={0.7}>
+    <TouchableOpacity
+      style={[styles.linkRow, disabled && styles.linkRowDisabled]}
+      onPress={() => {
+        if (disabled) return;
+        hapticLightPress();
+        onPress?.();
+      }}
+      activeOpacity={0.7}
+      disabled={disabled}
+      accessibilityState={disabled ? { disabled: true } : undefined}
+      testID={testID}
+    >
       <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={18} />
-      <ThemedText style={styles.linkLabel}>{label}</ThemedText>
+      {subtitle ? (
+        <View style={styles.linkLabelBlock}>
+          <ThemedText style={styles.linkLabelBare}>{label}</ThemedText>
+          <ThemedText variant="muted" size={12}>
+            {subtitle}
+          </ThemedText>
+        </View>
+      ) : (
+        <ThemedText style={styles.linkLabel}>{label}</ThemedText>
+      )}
       {value ? (
         <ThemedText
           variant="muted"
@@ -84,7 +113,11 @@ export const SettingsLinkRow: React.FC<SettingsRowProps> = ({
           </ThemedText>
         </View>
       )}
-      <Icon name="chevron-right" size={18} color={theme.colors.text.muted} />
+      {loading ? (
+        <ActivityIndicator size="small" color={theme.colors.text.muted} />
+      ) : (
+        <Icon name="chevron-right" size={18} color={theme.colors.text.muted} />
+      )}
     </TouchableOpacity>
   </View>
 );
@@ -185,6 +218,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
   },
+  linkRowDisabled: {
+    opacity: 0.45,
+  },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -197,6 +233,13 @@ const styles = StyleSheet.create({
   },
   linkLabel: {
     flex: 1,
+    fontSize: 14,
+  },
+  linkLabelBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  linkLabelBare: {
     fontSize: 14,
   },
   linkValue: {
