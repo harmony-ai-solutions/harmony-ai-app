@@ -28,6 +28,8 @@ beforeEach(() => {
   });
   (AuthService.refresh as jest.Mock).mockResolvedValue(true);
   (AuthService.enrollDevice as jest.Mock).mockResolvedValue(undefined);
+  (AuthService.isTokenExpired as jest.Mock).mockReturnValue(false);
+  (AuthService.getTokenExpiresAt as jest.Mock).mockReturnValue(Date.now() + 60 * 60 * 1000);
   (getDeviceId as jest.Mock).mockResolvedValue('device-abc');
   mockCheckAndRequestPermission.mockResolvedValue(true);
 });
@@ -36,9 +38,19 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, opts?: any) => (opts ? `${key}:${JSON.stringify(opts)}` : key) }),
 }));
 
-jest.mock('../../utils/logger', () => ({
-  createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
-}));
+// A STABLE logger object (createLogger runs at module load, when a
+// mock-prefixed `const` declared below the hoisted imports is still unset);
+// expose it through the factory and read the same instance back here.
+jest.mock('../../utils/logger', () => {
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+  return { createLogger: () => logger, __mockLogger: logger };
+});
+const mockLog = jest.requireMock('../../utils/logger').__mockLogger as {
+  info: jest.Mock;
+  warn: jest.Mock;
+  error: jest.Mock;
+  debug: jest.Mock;
+};
 
 jest.mock('react-native-linear-gradient', () => {
   const React = require('react');
@@ -77,10 +89,11 @@ jest.mock('../../contexts/AppToastContext', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }));
 
+const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => {
   const React = require('react');
   return {
-    useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }),
+    useNavigation: () => ({ navigate: mockNavigate, goBack: jest.fn() }),
     useFocusEffect: (cb: () => void) => React.useEffect(cb, [cb]),
   };
 });
@@ -164,6 +177,8 @@ jest.mock('../../services/auth/AuthService', () => ({
   __esModule: true,
   default: {
     getToken: jest.fn(async () => 'PASETO'),
+    getTokenExpiresAt: jest.fn(() => Date.now() + 60 * 60 * 1000),
+    isTokenExpired: jest.fn(() => false),
     getProfile: jest.fn(async () => ({ id: 'uid-1', email: 'user@example.com', display_name: 'User' })),
     refresh: jest.fn(async () => true),
     enrollDevice: jest.fn(async () => undefined),
@@ -230,6 +245,29 @@ function cloudStatus(over: Record<string, unknown> = {}) {
   return status({
     config: { ...status().config, transport: 'relay', relay_url: 'wss://sync.test/v1/sync/ws' },
     ...over,
+  });
+}
+
+/** The engine's auth_needed snapshot (relay rejected the bearer, close 4001). */
+function authNeededStatus() {
+  return cloudStatus({
+    state: 'auth_needed',
+    relay: {
+      connected: false,
+      auth_needed: true,
+      last_seq: 0,
+      last_seq_age_ms: 0,
+      acked_seq: 0,
+      buffered_frames: 0,
+      buffered_bytes: 0,
+      cap: 0,
+      overflow: false,
+      rejected_frames: 0,
+      decrypt_failures: 0,
+      sync_buffer_mb: 0,
+      sync_devices: 0,
+      backup_storage_mb: 0,
+    },
   });
 }
 
@@ -852,33 +890,88 @@ describe('DesktopSyncScreen', () => {
     expect(mockResetSyncKey).toHaveBeenCalled();
   });
 
-  it('auto-recovers auth_needed by re-injecting a fresh relay token', async () => {
+  // ── Honest relay auth recovery (2026-10-22 production diagnostics) ────────
+
+  it('re-injects a genuinely fresh relay token and only then logs success', async () => {
     mockUpdate.mockResolvedValue(cloudStatus());
-    await renderScreen(
-      cloudStatus({
-        state: 'auth_needed',
-        relay: {
-          connected: false,
-          auth_needed: true,
-          last_seq: 0,
-          last_seq_age_ms: 0,
-          acked_seq: 0,
-          buffered_frames: 0,
-          buffered_bytes: 0,
-          cap: 0,
-          overflow: false,
-          rejected_frames: 0,
-          decrypt_failures: 0,
-          sync_buffer_mb: 0,
-          sync_devices: 0,
-          backup_storage_mb: 0,
-        },
-      }),
-    );
+    let token = 'PASETO-STALE';
+    (AuthService.getToken as jest.Mock).mockImplementation(async () => token);
+    (AuthService.refresh as jest.Mock).mockImplementation(async () => {
+      token = 'PASETO-FRESH';
+      return true;
+    });
+    const utils = await renderScreen(authNeededStatus());
     await waitFor(() =>
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ relay_token: 'PASETO' })),
+      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ relay_token: 'PASETO-FRESH' })),
     );
     expect(AuthService.refresh).toHaveBeenCalled();
+    // The success log belongs to the VERIFIED path only.
+    expect(mockLog.info).toHaveBeenCalledWith('relay auth refreshed');
+    expect(
+      mockLog.warn.mock.calls.filter((c: any[]) => String(c[0]).includes('relay auth recovery')),
+    ).toHaveLength(0);
+    // No failure banner or sign-in CTA on the verified path.
+    expect(utils.queryByTestId('desktop-sync-auth-sign-in')).toBeNull();
+  });
+
+  it('never PUTs the cached token when the refresh rejects (and never claims success)', async () => {
+    (AuthService.refresh as jest.Mock).mockRejectedValue(new Error('network error'));
+    const utils = await renderScreen(authNeededStatus());
+    await waitFor(() =>
+      expect(mockLog.warn).toHaveBeenCalledWith(
+        expect.stringContaining('relay auth recovery failed'),
+        expect.anything(),
+      ),
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockLog.info).not.toHaveBeenCalledWith('relay auth refreshed');
+    // Honest UI: a transient failure is not dressed up as "sign-in expired"…
+    expect(utils.getByText('authRecoveryFailedBanner')).toBeTruthy();
+    // …but the one action that can fix auth is offered.
+    expect(utils.getByTestId('desktop-sync-auth-sign-in')).toBeTruthy();
+  });
+
+  it('skips the PUT when a "successful" refresh leaves the token unchanged', async () => {
+    // Default mocks: refresh resolves true, getToken always returns 'PASETO'.
+    const utils = await renderScreen(authNeededStatus());
+    await waitFor(() =>
+      expect(mockLog.warn).toHaveBeenCalledWith(
+        expect.stringContaining('token is unchanged after the refresh'),
+      ),
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockLog.info).not.toHaveBeenCalledWith('relay auth refreshed');
+    expect(utils.getByText('authRecoveryFailedBanner')).toBeTruthy();
+  });
+
+  it('skips the PUT when the refreshed token is already expired', async () => {
+    let token = 'PASETO-STALE';
+    (AuthService.getToken as jest.Mock).mockImplementation(async () => token);
+    (AuthService.refresh as jest.Mock).mockImplementation(async () => {
+      token = 'PASETO-FRESH';
+      return true;
+    });
+    (AuthService.isTokenExpired as jest.Mock).mockReturnValue(true);
+    await renderScreen(authNeededStatus());
+    await waitFor(() =>
+      expect(mockLog.warn).toHaveBeenCalledWith(
+        expect.stringContaining('refreshed token is already expired'),
+      ),
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockLog.info).not.toHaveBeenCalledWith('relay auth refreshed');
+  });
+
+  it('points at sign-in when the refresh token is rejected (terminal)', async () => {
+    (AuthService.refresh as jest.Mock).mockResolvedValue(false);
+    const utils = await renderScreen(authNeededStatus());
+    await waitFor(() => expect(utils.getByText('authSignInExpiredBanner')).toBeTruthy());
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockLog.info).not.toHaveBeenCalledWith('relay auth refreshed');
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-auth-sign-in'));
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('Login');
   });
 
   it('shows the quota-exceeded banner', async () => {

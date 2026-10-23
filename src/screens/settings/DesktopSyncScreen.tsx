@@ -300,6 +300,14 @@ const TransportPicker: React.FC<{
  * "join the existing sync group": `group_join_pending: true` is PUT
  * unconditionally and the join (escrow GET → engine import) runs
  * automatically — the step that was previously silently missing.
+ *
+ * **Honest relay auth recovery (2026-10-22 production diagnostics).** The
+ * `auth_needed` recovery only re-PUTs a token it VERIFIED came from a
+ * successful refresh (changed, not already applied, not already expired), and
+ * the banner distinguishes "refreshing", "couldn't refresh" and "sign-in
+ * expired" — the last two offer the sign-in screen. The pre-incident path
+ * logged "relay auth refreshed" while re-sending the same stale token, so the
+ * relay kept rejecting every dial for minutes with no honest signal.
  */
 export const DesktopSyncScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -351,10 +359,21 @@ export const DesktopSyncScreen: React.FC = () => {
     windows_amd64: string;
     linux_amd64: string;
   } | null>(null);
+  // Honest auth_recovery state for the auth-needed banner:
+  //   idle       → nothing attempted yet (or the last attempt verified a fresh token)
+  //   checking   → a refresh is running (the "refreshing…" copy is truthful)
+  //   failed     → couldn't get/verify a fresh token (network or a silent no-op refresh)
+  //   signed_out → the refresh token was rejected; only re-signing in helps
+  const [authRecovery, setAuthRecovery] = useState<'idle' | 'checking' | 'failed' | 'signed_out'>(
+    'idle',
+  );
 
   const formLoadedRef = useRef(false);
   const inFlightRef = useRef(false);
   const recoveringRef = useRef(false);
+  // The last relay token this screen successfully PUT to the engine — a token
+  // equal to this one is already applied and must never be re-sent.
+  const lastRelayTokenRef = useRef<string | null>(null);
   const rotationRelayedRef = useRef(false);
   const scanProcessingRef = useRef(false);
 
@@ -375,18 +394,104 @@ export const DesktopSyncScreen: React.FC = () => {
   }, []);
 
   /**
-   * auth_needed auto-recovery (7-2/7-3): the engine hit relay close 4001
-   * (bearer rejected) — refresh the account PASETO and re-PUT `relay_token`.
-   * Guarded so a still-auth_needed status does not loop.
+   * auth_needed auto-recovery (7-2/7-3) — HONEST since the 2026-10-22 incident.
+   *
+   * The engine hit relay close 4001 (bearer rejected): refresh the account
+   * PASETO and re-PUT `relay_token`. The pre-incident version swallowed a
+   * failed refresh, re-PUT the SAME stale token and logged "relay auth
+   * refreshed" unconditionally — the relay kept rejecting every dial while the
+   * app claimed recovery. Now:
+   *   - a failed refresh NEVER reaches `updateSyncClientConfig`;
+   *   - after a refresh that reports success the token is verified to be
+   *     actually fresh (changed, unexpired, not already applied) — a silent
+   *     no-op refresh is a warn, not a PUT;
+   *   - the info log fires ONLY after a verified token was accepted by the
+   *     engine, on the same code path.
+   * Failures set `authRecovery` so the banner tells the truth (a rejected
+   * refresh points at the sign-in screen instead of implying a retry).
+   * Guarded by `recoveringRef` so a still-auth_needed status does not loop.
    */
   const recoverRelayAuth = useCallback(async () => {
+    setAuthRecovery('checking');
+
+    // Read the credential the engine currently holds BEFORE refreshing. This
+    // also warms AuthService's cache (loading the refresh token from Keychain
+    // on a cold start) so the refresh below cannot spuriously report a
+    // terminal failure just because nothing had been read yet.
+    let previousToken: string | null = null;
     try {
-      await AuthService.refresh().catch(() => false);
-      const token = await AuthService.getToken();
+      previousToken = await AuthService.getToken();
+    } catch {
+      // No stored credential at all — the refresh cannot help; it returns
+      // false below (no refresh token) and the terminal path handles it.
+    }
+
+    let refreshed: boolean;
+    try {
+      refreshed = await AuthService.refresh();
+    } catch (e: any) {
+      // TRANSIENT (network / 5xx): the credentials may still be valid, so do
+      // not claim the sign-in expired — but never PUT the unverified token.
+      log.warn('relay auth recovery failed: refresh error:', e?.message ?? String(e));
+      setAuthRecovery('failed');
+      return;
+    }
+
+    if (!refreshed) {
+      // TERMINAL: the refresh token was rejected (or none is stored).
+      log.warn('relay auth recovery failed: cloud sign-in expired (refresh rejected)');
+      setAuthRecovery('signed_out');
+      return;
+    }
+
+    let token: string;
+    try {
+      token = await AuthService.getToken();
+    } catch (e: any) {
+      log.warn(
+        'relay auth recovery failed: no cloud token after refresh:',
+        e?.message ?? String(e),
+      );
+      setAuthRecovery('signed_out');
+      return;
+    }
+
+    // ── Verify freshness before the PUT ────────────────────────────────────
+    // A successful refresh re-issues the PASETO, so an unchanged value means
+    // the refresh silently did nothing; sending it would only extend the
+    // relay's 401 loop that caused this recovery in the first place.
+    if (!token) {
+      log.warn('relay auth recovery skipped: refresh produced an empty token');
+      setAuthRecovery('failed');
+      return;
+    }
+    if (previousToken !== null && token === previousToken) {
+      log.warn('relay auth recovery skipped: the token is unchanged after the refresh');
+      setAuthRecovery('failed');
+      return;
+    }
+    if (token === lastRelayTokenRef.current) {
+      log.warn('relay auth recovery skipped: this token is already applied to the engine');
+      setAuthRecovery('failed');
+      return;
+    }
+    // AuthService exposes the cached PASETO expiry (`getTokenExpiresAt` /
+    // `isTokenExpired`, derived from `expires_at`). Unknown expiry (0) is not
+    // treated as expired — only a known-past expiry blocks the PUT.
+    if (AuthService.isTokenExpired?.() === true) {
+      log.warn('relay auth recovery skipped: the refreshed token is already expired');
+      setAuthRecovery('failed');
+      return;
+    }
+
+    try {
       await engineApiClient.updateSyncClientConfig({ relay_token: token });
+      lastRelayTokenRef.current = token;
+      setAuthRecovery('idle');
       log.info('relay auth refreshed');
-    } catch (e) {
-      log.warn('relay auth recovery failed:', e);
+    } catch (e: any) {
+      log.warn('relay auth recovery failed: relay token update rejected:', e?.message ?? String(e));
+      setAuthRecovery('failed');
     }
   }, []);
 
@@ -414,6 +519,9 @@ export const DesktopSyncScreen: React.FC = () => {
         void recoverRelayAuth();
       } else if (!needsAuth) {
         recoveringRef.current = false;
+        // Recovered (or the engine no longer needs auth) — the banner must stop
+        // claiming a failure it no longer has.
+        setAuthRecovery('idle');
       }
     },
     [recoverRelayAuth, storeVariant],
@@ -480,6 +588,11 @@ export const DesktopSyncScreen: React.FC = () => {
   // Poll while the screen is focused.
   useFocusEffect(
     useCallback(() => {
+      // A fresh visit re-arms the ONE-SHOT auth recovery: returning from the
+      // sign-in screen must retry once. The status poll itself never retries
+      // (recoveringRef stays set within a focused visit), so a still-auth_needed
+      // status cannot loop.
+      recoveringRef.current = false;
       refreshStatus();
       refreshGroupStatus();
       refreshRotationFlag();
@@ -1233,11 +1346,35 @@ export const DesktopSyncScreen: React.FC = () => {
           {state === 'auth_needed' ? (
             <ThemedCard style={styles.infoCard} testID="desktop-sync-auth-needed">
               <View style={styles.warningRow}>
-                <Icon name="shield-refresh-outline" size={18} color={accentPrimary} />
+                <Icon
+                  name="shield-refresh-outline"
+                  size={18}
+                  color={authRecovery === 'signed_out' ? '#f44336' : accentPrimary}
+                />
                 <ThemedText variant="secondary" size={13} style={styles.warningText}>
-                  {t('authNeededBanner')}
+                  {authRecovery === 'signed_out'
+                    ? t('authSignInExpiredBanner')
+                    : authRecovery === 'failed'
+                      ? t('authRecoveryFailedBanner')
+                      : t('authNeededBanner')}
                 </ThemedText>
               </View>
+              {/* The honest failure path: the app could not produce a token the
+                  relay accepts, so point at the ONE action that fixes it
+                  (re-signing in) instead of implying a transient retry. */}
+              {authRecovery === 'signed_out' || authRecovery === 'failed' ? (
+                <ThemedButton
+                  label={t('authSignInButton')}
+                  icon="login"
+                  variant="outline"
+                  onPress={() => {
+                    hapticLightPress();
+                    navigation.navigate('Login');
+                  }}
+                  style={styles.actionButton}
+                  testID="desktop-sync-auth-sign-in"
+                />
+              ) : null}
             </ThemedCard>
           ) : null}
 
