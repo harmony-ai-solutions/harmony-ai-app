@@ -8,11 +8,12 @@
  *
  *   1. Ensure the embedded engine is started (reuse a live connection, else
  *      start — task 4-2).
- *   2. Refresh + inject the inference credential (best-effort): the cloud
- *      PASETO is written into the engine's SoulbitsCloud provider rows
- *      (`updateAllSoulbitsCloudApiKeys`). A failure — or a signed-out device —
- *      degrades the batch to non-LLM mode (`Degraded`), so state still advances
- *      and no narratives/relay spam are produced (step 5).
+ *   2. Refresh + inject the inference credential (best-effort): ensure the
+ *      account's long-lived `Soulbits Engine` API key is in the engine's
+ *      SoulbitsCloud provider row (`ensureCloudEngineKey` — writes only when
+ *      the row changed). A failure — or a signed-out device — degrades the
+ *      batch to non-LLM mode (`Degraded`), so state still advances and no
+ *      narratives/relay spam are produced (step 5).
  *   3. Fetch the tier's daily beat budget (4-4 policy API) and slice it into a
  *      per-wake budget (see {@link perWakeMaxBeats}).
  *   4. Run `lifecycle.batch` with a deadline STRICTLY before the OS window
@@ -27,7 +28,7 @@
 
 import { createLogger } from '../../utils/logger';
 import AuthService from '../auth/AuthService';
-import { updateAllSoulbitsCloudApiKeys } from '../../database/repositories';
+import { ensureCloudEngineKey } from '../cloud/engineKeyEnsure';
 import { fetchAutonomyBeatsPerDay } from '../cloud/soulbitsClient';
 import { connectEngine, disconnectEngine, getEngineConnection } from './EngineService';
 import type { EngineConnection } from './EngineService';
@@ -114,8 +115,8 @@ export interface IOSLifecycleWakeDeps {
   call: (method: string, payloadJSON: string) => Promise<string>;
   /** Read the cached cloud PASETO (null when signed out). */
   getToken: () => Promise<string | null>;
-  /** Inject the fresh PASETO into the engine's SoulbitsCloud provider rows. */
-  refreshCredentials: (paseto: string) => Promise<void>;
+  /** Ensure the long-lived engine API key is applied to the provider row. */
+  refreshCredentials: () => Promise<void>;
   /** Fetch the tier's daily beat budget (null when unknown/undefined). */
   fetchBudget: (paseto: string) => Promise<number | null>;
   /** Compose the relay notice for an entity that delivered outreach. */
@@ -187,7 +188,9 @@ export function defaultIOSLifecycleWakeDeps(): IOSLifecycleWakeDeps {
         return null;
       }
     },
-    refreshCredentials: updateAllSoulbitsCloudApiKeys,
+    refreshCredentials: async () => {
+      await ensureCloudEngineKey();
+    },
     fetchBudget: fetchAutonomyBeatsPerDay,
     composeOutreach: composeOutreachFromEngine,
     relay: createDefaultPushRelayClient(),
@@ -312,7 +315,7 @@ export async function runIOSLifecycleWake(
     let dailyBudget: number | null = null;
     if (paseto) {
       try {
-        await deps.refreshCredentials(paseto);
+        await deps.refreshCredentials();
       } catch (e) {
         degraded = true;
         log.warn('credential injection failed — batch runs degraded (non-LLM):', e);

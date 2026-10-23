@@ -10,7 +10,9 @@
  * correctness path:
  *
  *   1. Ensure the embedded engine is started.
- *   2. Refresh + inject the credential (best-effort → degraded non-LLM mode).
+ *   2. Refresh + inject the credential (best-effort → degraded non-LLM mode):
+ *      ensure the account's long-lived `Soulbits Engine` API key is in the
+ *      engine's SoulbitsCloud provider row (writes only when it changed).
  *   3. `lifecycle.maintenance` — the 0-4 deep sweep (memory compaction across
  *      the live automatable entities), with a conservative deadline.
  *   4. `lifecycle.batch` — advance any remaining backlog + dream triggers, with
@@ -26,7 +28,7 @@
 
 import { createLogger } from '../../utils/logger';
 import AuthService from '../auth/AuthService';
-import { updateAllSoulbitsCloudApiKeys } from '../../database/repositories';
+import { ensureCloudEngineKey } from '../cloud/engineKeyEnsure';
 import { fetchAutonomyBeatsPerDay } from '../cloud/soulbitsClient';
 import { connectEngine, disconnectEngine, getEngineConnection } from './EngineService';
 import type { EngineConnection } from './EngineService';
@@ -68,7 +70,8 @@ export interface IOSMaintenanceDeps {
   stopEngine: () => Promise<void>;
   call: (method: string, payloadJSON: string) => Promise<string>;
   getToken: () => Promise<string | null>;
-  refreshCredentials: (paseto: string) => Promise<void>;
+  /** Ensure the long-lived engine API key is applied to the provider row. */
+  refreshCredentials: () => Promise<void>;
   fetchBudget: (paseto: string) => Promise<number | null>;
   composeOutreach: (entityId: string) => Promise<OutreachNotice | null>;
   relay: PushRelayClient;
@@ -117,7 +120,9 @@ export function defaultIOSMaintenanceDeps(): IOSMaintenanceDeps {
         return null;
       }
     },
-    refreshCredentials: updateAllSoulbitsCloudApiKeys,
+    refreshCredentials: async () => {
+      await ensureCloudEngineKey();
+    },
     fetchBudget: fetchAutonomyBeatsPerDay,
     composeOutreach: defaultComposeOutreach,
     relay: createDefaultPushRelayClient(),
@@ -185,7 +190,7 @@ export async function runIOSMaintenanceSweep(
     let dailyBudget: number | null = null;
     if (paseto) {
       try {
-        await deps.refreshCredentials(paseto);
+        await deps.refreshCredentials();
       } catch (e) {
         degraded = true;
         log.warn('credential injection failed — sweep runs degraded (non-LLM):', e);

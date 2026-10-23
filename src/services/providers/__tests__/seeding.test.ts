@@ -17,6 +17,7 @@ import { engineApiClient } from '../../engine/EngineApiClient';
 import { getEngineConnection, onEngineConnectionChange } from '../../engine/EngineService';
 import * as repo from '../../../database/repositories';
 import { ensureSeededDefaults, startSeedingEnsure } from '../seeding';
+import { ensureCloudEngineKey, getLastAppliedEngineKey } from '../../cloud/engineKeyEnsure';
 import { CLOUD_HOSTS } from '../../../config/cloud';
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
@@ -58,6 +59,12 @@ jest.mock('../../engine/EngineService', () => ({
   onEngineConnectionChange: jest.fn(() => jest.fn()),
 }));
 
+jest.mock('../../cloud/engineKeyEnsure', () => ({
+  __esModule: true,
+  ensureCloudEngineKey: jest.fn(),
+  getLastAppliedEngineKey: jest.fn(),
+}));
+
 jest.mock('../../../database/repositories', () => ({
   __esModule: true,
   listAccounts: jest.fn(),
@@ -89,6 +96,8 @@ const auth = AuthService as unknown as {
   refreshDeduped: jest.Mock;
 };
 const engine = engineApiClient as unknown as { listProviderModels: jest.Mock };
+const ensureKey = ensureCloudEngineKey as jest.Mock;
+const cachedEngineKey = getLastAppliedEngineKey as jest.Mock;
 const engineConnection = {
   getEngineConnection: getEngineConnection as jest.Mock,
   onEngineConnectionChange: onEngineConnectionChange as jest.Mock,
@@ -211,6 +220,8 @@ beforeEach(() => {
   // Default: a comfortably-fresh cached token (well outside any threshold).
   auth.getTokenExpiresAt.mockReturnValue(Date.now() + 60 * 60 * 1000);
   auth.refreshDeduped.mockResolvedValue(true);
+  ensureKey.mockResolvedValue({ status: 'reused', key: 'sb_cloud_cachedkey' });
+  cachedEngineKey.mockReturnValue('sb_cloud_cachedkey');
   r.listAccounts.mockResolvedValue([account()]);
   r.createAccount.mockResolvedValue('acct-created');
   r.updateAccount.mockResolvedValue(undefined);
@@ -242,39 +253,33 @@ beforeEach(() => {
   mockedSetItem.mockResolvedValue(undefined);
 });
 
-// ── Token first (never flag-gated) ──────────────────────────────────────────
+// ── Credential first (never flag-gated) ─────────────────────────────────────
 
-describe('ensureSeededDefaults — token first', () => {
-  it('updates the soulbitscloud account with the current PASETO (update-if-exists)', async () => {
+describe('ensureSeededDefaults — credential first', () => {
+  it('runs the engine-key ensure and never writes the PASETO into the account', async () => {
     engineSeededInstall();
 
     await ensureSeededDefaults();
 
+    expect(ensureKey).toHaveBeenCalledTimes(1);
     expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
-      api_key: 'paseto-current',
       base_url: CLOUD_HOSTS.inference,
     });
+    // The PASETO is only used for gateway discovery, never as the account key.
+    expect(r.updateAccount).not.toHaveBeenCalledWith(
+      'acct-1',
+      expect.objectContaining({ api_key: expect.anything() }),
+    );
   });
 
-  it('uses the PASETO carried by the auth:changed event', async () => {
-    engineSeededInstall();
-
-    await ensureSeededDefaults('paseto-event');
-
-    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
-      api_key: 'paseto-event',
-      base_url: CLOUD_HOSTS.inference,
-    });
-  });
-
-  it('updates the key even when the gap-fill guard is already set (NOT flag-gated)', async () => {
+  it('runs the credential step even when the gap-fill guard is already set (NOT flag-gated)', async () => {
     engineSeededInstall();
     mockStorage({ 'seeding_done_v1:acct-1': '1' });
 
     await ensureSeededDefaults('paseto-renewed');
 
+    expect(ensureKey).toHaveBeenCalledTimes(1);
     expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
-      api_key: 'paseto-renewed',
       base_url: CLOUD_HOSTS.inference,
     });
     expect(r.createBackendConfig).not.toHaveBeenCalled();
@@ -286,12 +291,13 @@ describe('ensureSeededDefaults — token first', () => {
 
     await ensureSeededDefaults();
 
+    expect(ensureKey).not.toHaveBeenCalled();
     expect(r.listAccounts).not.toHaveBeenCalled();
     expect(r.updateAccount).not.toHaveBeenCalled();
     expect(r.createBackendConfig).not.toHaveBeenCalled();
   });
 
-  it('creates the soulbitscloud account when none exists', async () => {
+  it('creates the soulbitscloud account with the last-applied engine key', async () => {
     r.listAccounts.mockResolvedValue([]);
     engineSeededInstall();
 
@@ -299,7 +305,7 @@ describe('ensureSeededDefaults — token first', () => {
 
     expect(r.createAccount).toHaveBeenCalledWith('soulbitscloud', {
       name: 'Soulbits Cloud',
-      api_key: 'paseto-fresh',
+      api_key: 'sb_cloud_cachedkey',
       base_url: CLOUD_HOSTS.inference,
     });
     expect(r.updateAccount).not.toHaveBeenCalled();
@@ -315,19 +321,19 @@ describe('ensureSeededDefaults — token first', () => {
 // ── Stale-token guard (provider-registry follow-up) ─────────────────────────
 
 describe('ensureSeededDefaults — stale-token guard', () => {
-  it('writes a fresh token as today, without refreshing', async () => {
+  it('runs the credential step with a fresh token, without refreshing', async () => {
     engineSeededInstall();
 
     await ensureSeededDefaults();
 
     expect(auth.refreshDeduped).not.toHaveBeenCalled();
+    expect(ensureKey).toHaveBeenCalledTimes(1);
     expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
-      api_key: 'paseto-current',
       base_url: CLOUD_HOSTS.inference,
     });
   });
 
-  it('refreshes an expired cached token once, then writes the fresh PASETO', async () => {
+  it('refreshes an expired cached token once, then runs the flow', async () => {
     engineSeededInstall();
     auth.getTokenExpiresAt
       .mockReturnValueOnce(Date.now() - 1000) // expired at the guard
@@ -340,13 +346,13 @@ describe('ensureSeededDefaults — stale-token guard', () => {
     await ensureSeededDefaults();
 
     expect(auth.refreshDeduped).toHaveBeenCalledTimes(1);
+    expect(ensureKey).toHaveBeenCalledTimes(1);
     expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
-      api_key: 'paseto-fresh',
       base_url: CLOUD_HOSTS.inference,
     });
   });
 
-  it('skips the account write when an expired token is rejected (terminal)', async () => {
+  it('skips the flow when an expired token is rejected (terminal)', async () => {
     engineSeededInstall();
     auth.getTokenExpiresAt.mockReturnValue(Date.now() - 1000);
     auth.refreshDeduped.mockResolvedValue(false);
@@ -354,22 +360,24 @@ describe('ensureSeededDefaults — stale-token guard', () => {
     await ensureSeededDefaults();
 
     expect(auth.refreshDeduped).toHaveBeenCalledTimes(1);
+    expect(ensureKey).not.toHaveBeenCalled();
     expect(r.updateAccount).not.toHaveBeenCalled();
     expect(r.createAccount).not.toHaveBeenCalled();
   });
 
-  it('skips the account write on a transient refresh failure and never throws', async () => {
+  it('skips the flow on a transient refresh failure and never throws', async () => {
     engineSeededInstall();
     auth.getTokenExpiresAt.mockReturnValue(Date.now() - 1000);
     auth.refreshDeduped.mockRejectedValue(new Error('network'));
 
     await expect(ensureSeededDefaults()).resolves.toBeUndefined();
 
+    expect(ensureKey).not.toHaveBeenCalled();
     expect(r.updateAccount).not.toHaveBeenCalled();
     expect(r.listAccounts).not.toHaveBeenCalled();
   });
 
-  it('skips the account write when the refreshed token is itself expired', async () => {
+  it('skips the flow when the refreshed token is itself expired', async () => {
     engineSeededInstall();
     auth.getTokenExpiresAt
       .mockReturnValueOnce(Date.now() - 1000) // expired at the guard
@@ -378,16 +386,18 @@ describe('ensureSeededDefaults — stale-token guard', () => {
 
     await ensureSeededDefaults();
 
+    expect(ensureKey).not.toHaveBeenCalled();
     expect(r.updateAccount).not.toHaveBeenCalled();
   });
 
-  it('does not write an expired token even when carried by the auth:changed event', async () => {
+  it('does not run with an expired token even when carried by the auth:changed event', async () => {
     engineSeededInstall();
     auth.getTokenExpiresAt.mockReturnValue(Date.now() - 1000);
     auth.refreshDeduped.mockResolvedValue(false);
 
     await ensureSeededDefaults('paseto-event');
 
+    expect(ensureKey).not.toHaveBeenCalled();
     expect(r.updateAccount).not.toHaveBeenCalled();
   });
 });
@@ -395,11 +405,12 @@ describe('ensureSeededDefaults — stale-token guard', () => {
 // ── Fresh install (engine-seeded) no-op ─────────────────────────────────────
 
 describe('ensureSeededDefaults — fresh install (engine-init configs present)', () => {
-  it('fills the token, leaves configs untouched, and no-ops gap-fill', async () => {
+  it('ensures the credential, leaves configs untouched, and no-ops gap-fill', async () => {
     engineSeededInstall();
 
     await ensureSeededDefaults('paseto-1');
 
+    expect(ensureKey).toHaveBeenCalledTimes(1);
     expect(r.updateAccount).toHaveBeenCalledTimes(1);
     expect(r.createBackendConfig).not.toHaveBeenCalled();
     expect(r.createCognitionConfig).not.toHaveBeenCalled();
@@ -544,7 +555,9 @@ describe('ensureSeededDefaults — persisted guard', () => {
 
     await ensureSeededDefaults('paseto-1');
 
-    expect(r.updateAccount).toHaveBeenCalledWith('acct-new', expect.objectContaining({ api_key: 'paseto-1' }));
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-new', {
+      base_url: CLOUD_HOSTS.inference,
+    });
     expect(r.createBackendConfig).toHaveBeenCalledTimes(1);
     expect(mockedSetItem).toHaveBeenCalledWith('seeding_done_v1:acct-new', '1');
   });
@@ -573,7 +586,6 @@ describe('ensureSeededDefaults — engine readiness deferral', () => {
 
     expect(r.listAccounts).toHaveBeenCalledTimes(2);
     expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
-      api_key: 'paseto-current',
       base_url: CLOUD_HOSTS.inference,
     });
     stop();
@@ -603,7 +615,9 @@ describe('ensureSeededDefaults — engine readiness deferral', () => {
     await flush();
 
     expect(r.listAccounts).toHaveBeenCalledTimes(3);
-    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', expect.objectContaining({ api_key: 'paseto-current' }));
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      base_url: CLOUD_HOSTS.inference,
+    });
     stop();
   });
 
@@ -639,13 +653,17 @@ describe('startSeedingEnsure', () => {
 
     // Bootstrap path — a cold start already signed in (no event).
     await flush();
-    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', expect.objectContaining({ api_key: 'paseto-boot' }));
+    expect(ensureKey).toHaveBeenCalledTimes(1);
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      base_url: CLOUD_HOSTS.inference,
+    });
 
     // Re-auth / token renewal path.
     const handler = auth.on.mock.calls[0][1] as (paseto: string) => void;
     handler('paseto-refreshed');
     await flush();
-    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', expect.objectContaining({ api_key: 'paseto-refreshed' }));
+    expect(ensureKey).toHaveBeenCalledTimes(2);
+    expect(r.updateAccount).toHaveBeenCalledTimes(2);
 
     stop();
     expect(auth.off).toHaveBeenCalledWith('auth:changed', handler);

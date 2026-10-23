@@ -10,13 +10,14 @@
  * `ensureSeededDefaults()` runs on every cloud authentication AND
  * re-authentication / token renewal (plan §11 A9) and does two things:
  *
- *   1. **Token first (NEVER flag-gated).** Ensure the soulbitscloud account
- *      exists and carries the CURRENT PASETO —
- *      `{api_key: <PASETO>, base_url: CLOUD_HOSTS.inference}` — updating it when
- *      present (which subsumes token rotation). `updateAllSoulbitsCloudApiKeys`
- *      stays the bulk-refresh path; the engine-side refresh-token route and
- *      cloud-mode refresh remain authoritative for their own surfaces — all
- *      converge on the single account row post-3-2.
+ *   1. **Credential first (NEVER flag-gated).** Ensure the `soulbitscloud`
+ *      account exists, that its `base_url` is the active inference host, and —
+ *      through the shared ensure flow — that it carries the account's
+ *      LONG-LIVED `Soulbits Engine` API key. The PASETO is NOT written into the
+ *      account: the ≤1h sign-in credential caused the 2026-10-23 incident where
+ *      live engine modules pinned it and 401'd after expiry. The key is written
+ *      by `engineKeyEnsure` only when it changed (one key per account, no
+ *      per-rotation churn); this module owns the account row and its gap-fill.
  *   2. **Gap-fill (flag-gated per account).** Per module type (7; imagination
  *      skipped — skip-when-no-model) AND per STT slot (transcription, VAD), if
  *      the user has ZERO configs of that type/slot → create
@@ -37,11 +38,11 @@
  * `auth:changed` fires ~180 ms BEFORE the engine management API connects, so the
  * first ensure (bootstrap AND event) fails with `Engine is not connected — …`
  * (see `requireEngineConnection()`). Instead of only logging — which left the
- * engine account holding an EXPIRED PASETO (TTS 401 `token expired`) — the
- * failure is parked on the next engine-ready event and the FULL ensure flow is
- * re-run PASETO-LESS, so it re-reads the cached token through its own
- * `resolveFreshToken` expiry guard. One retry is armed at a time; a second
- * failure during the same race is absorbed. Sign-in is never blocked.
+ * engine account without its long-lived key — the failure is parked on the next
+ * engine-ready event and the FULL ensure flow is re-run PASETO-LESS, so it
+ * re-reads the cached token through its own `resolveFreshToken` expiry guard.
+ * One retry is armed at a time; a second failure during the same race is
+ * absorbed. Sign-in is never blocked.
  */
 
 import i18n from 'i18next';
@@ -54,6 +55,10 @@ import {
   createEngineReadinessDeferral,
   shouldDeferForEngineReadiness,
 } from '../engine/engineReadiness';
+import {
+  ensureCloudEngineKey,
+  getLastAppliedEngineKey,
+} from '../cloud/engineKeyEnsure';
 import { createLogger } from '../../utils/logger';
 import {
   listAccounts,
@@ -114,12 +119,14 @@ const MODULE_MODEL_TYPE: Record<string, string> = {
 // ── Public API ──────────────────────────────────────────────────────────
 
 /**
- * Ensure the soulbitscloud account carries the current PASETO and gap-fill any
- * deleted default configs. Safe to call on every auth/re-auth trigger: the token
- * step always runs, the gap-fill scan is guard-gated. Never throws.
+ * Ensure the engine is on the account's long-lived API key, that the
+ * soulbitscloud account exists, and gap-fill any deleted default configs. Safe
+ * to call on every auth/re-auth trigger: the credential step always runs, the
+ * gap-fill scan is guard-gated. Never throws.
  *
  * @param pasetoOverride the PASETO carried by the `auth:changed` event; when
- *   omitted the cached token is read from {@link AuthService}.
+ *   omitted the cached token is read from {@link AuthService}. Only used for
+ *   the gateway model listing — it is never written into the account.
  */
 export async function ensureSeededDefaults(pasetoOverride?: string): Promise<void> {
   try {
@@ -129,15 +136,21 @@ export async function ensureSeededDefaults(pasetoOverride?: string): Promise<voi
       return;
     }
 
-    // Stale-token guard (provider-registry follow-up): never write an EXPIRED
-    // PASETO into the engine account. If the cached token is already expired,
-    // attempt one refresh first; when no valid token is obtainable, SKIP the
-    // account write (and the gap-fill) rather than propagating stale
-    // credentials. A still-valid token passes straight through, unchanged.
+    // Stale-token guard (provider-registry follow-up): never use an EXPIRED
+    // PASETO for model discovery/gap-fill. If the cached token is already
+    // expired, attempt one refresh first; when no valid token is obtainable,
+    // SKIP the flow rather than propagating stale credentials. A still-valid
+    // token passes straight through, unchanged.
     const freshPaseto = await resolveFreshToken(paseto);
     if (!freshPaseto) return;
 
-    const accountId = await ensureSoulbitsAccount(freshPaseto);
+    // The account credential is the long-lived engine API key — never the
+    // PASETO (2026-10-23 incident). The ensure flow mints/reuses ONE key and
+    // writes the row only when it changed.
+    const credential = await ensureCloudEngineKey();
+    if (credential.status === 'signed_out') return;
+
+    const accountId = await ensureSoulbitsAccount(getLastAppliedEngineKey() ?? '');
     if (!accountId) return;
 
     await gapFill(accountId, freshPaseto);
@@ -201,15 +214,16 @@ function safeExpiresAt(): number {
 }
 
 /**
- * Return a token that is safe to write into the engine account.
+ * Return a token that is safe to use against the gateway for model discovery.
+ * It is never written into the engine account.
  *
  * A token that is NOT already expired passes straight through (the common path
  * — behaviour is unchanged). An EXPIRED token triggers exactly one refresh
  * through {@link AuthService.refreshDeduped} (shared dedup with the 401-retry
  * and startup paths — never a parallel refresh). Returns null — so the caller
- * SKIPS the account write — when no valid token is obtainable: a terminal
- * rejection, a transient refresh failure, or a refresh that yields an expired
- * token. Never throws.
+ * SKIPS the flow — when no valid token is obtainable: a terminal rejection, a
+ * transient refresh failure, or a refresh that yields an expired token. Never
+ * throws.
  */
 async function resolveFreshToken(fallback: string): Promise<string | null> {
   const expiresAt = safeExpiresAt();
@@ -243,17 +257,19 @@ async function resolveFreshToken(fallback: string): Promise<string | null> {
 }
 
 /**
- * Ensure the shared soulbitscloud account exists and carries the current PASETO
- * (`update-if-exists`, which subsumes rotation). Returns its id, or null when
- * neither an update nor a create succeeded.
+ * Ensure the shared soulbitscloud account exists and points at the active
+ * inference host. The account's `api_key` is NEVER overwritten here — it holds
+ * the long-lived engine API key owned by the ensure flow. A missing account is
+ * created with the current engine key (the ensure flow's next trigger fills it
+ * if none was resolved yet). Returns its id, or null when no account could be
+ * created.
  */
-async function ensureSoulbitsAccount(paseto: string): Promise<string | null> {
+async function ensureSoulbitsAccount(engineKey: string): Promise<string | null> {
   const accounts = (await listAccounts(SOULBITS)).filter(a => !a.deleted_at);
 
   if (accounts.length > 0) {
     for (const account of accounts) {
       await updateAccount(account.id, {
-        api_key: paseto,
         base_url: CLOUD_HOSTS.inference,
       });
     }
@@ -261,10 +277,10 @@ async function ensureSoulbitsAccount(paseto: string): Promise<string | null> {
   }
 
   // Edge: the engine normally seeds this account on an empty DB. Create it if
-  // it is somehow absent so the token + gap-fill have a target.
+  // it is somehow absent so the credential + gap-fill have a target.
   return createAccount(SOULBITS, {
     name: i18n.t('providers:soulbitsAccountName'),
-    api_key: paseto,
+    api_key: engineKey,
     base_url: CLOUD_HOSTS.inference,
   });
 }
