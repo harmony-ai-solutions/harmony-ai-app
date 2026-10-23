@@ -10,6 +10,7 @@ import {
   isSamplingParamKey,
   isParamSupported,
   partitionFieldsBySupport,
+  resolveEffectiveSpeechOptions,
   supportedParams,
   findModel,
 } from '../modelCapabilities';
@@ -110,6 +111,29 @@ describe('getSpeechOptions', () => {
     expect(getSpeechOptions(unknown)).toBeNull();
     expect(getSpeechOptions(undefined)).toBeNull();
     expect(getSpeechOptions({ id: 'x', meta: { speech_options: 'nope' } })).toBeNull();
+  });
+});
+
+describe('resolveEffectiveSpeechOptions', () => {
+  it('only advertises voice_cloning for families that can actually clone', () => {
+    // Offline catalog (no declared metadata): the slug decides the family.
+    const kitten = resolveEffectiveSpeechOptions(undefined, 'kitten-tts-mini', 'soulbitscloud');
+    expect(kitten?.supports_voice_cloning).toBe(false);
+    expect(kitten?.operation_modes).toEqual(['single_speaker_tts']);
+    expect(kitten?.supported_generation_params).toEqual(['speed']);
+
+    // An unknown model must not get a cloning CTA either (the TTS voice
+    // picker shows a "use Voice Cloning" hint based on these flags).
+    const unknownTts = resolveEffectiveSpeechOptions(undefined, 'ghost-tts', 'soulbitscloud');
+    expect(unknownTts?.supports_voice_cloning).toBe(false);
+    expect(unknownTts?.operation_modes).toEqual(['single_speaker_tts']);
+
+    // Chatterbox + HarmonySpeech do clone via embeddings.
+    for (const id of ['chatterbox', 'harmonyspeech']) {
+      const options = resolveEffectiveSpeechOptions(undefined, id, 'soulbitscloud');
+      expect(options?.supports_voice_cloning).toBe(true);
+      expect(options?.operation_modes).toContain('voice_cloning');
+    }
   });
 });
 

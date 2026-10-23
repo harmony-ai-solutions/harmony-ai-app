@@ -9,7 +9,8 @@
  *    a language scope (KittenTTS) — chatterbox's voices live per language
  *  - soulvoice (HSE) live: `languages` = plain names, `voices` = [{voice,
  *    language?, styles?}] descriptors keyed `voice`
- *  - the app's offline catalog: neither (generic fallback applies)
+ *  - the app's offline catalog: neither → the callers HIDE the pickers (there
+ *    is no static fallback list any more — see ProviderSlotSection's note)
  *
  * Regression notes (owner report, 2026-10-22): `String(code)` over the
  * gateway's language objects rendered "[object Object]" rows, and the old
@@ -60,13 +61,13 @@ describe('normalizeTtsLanguageOptions', () => {
     ]);
   });
 
-  it('uses the generic fallback when the model declares no languages', () => {
-    const fallback = normalizeTtsLanguageOptions(undefined);
-    expect(fallback).toEqual(normalizeTtsLanguageOptions([]));
-    // Auto + the ISO codes, uppercased exactly as Chatterbox declares them.
-    expect(fallback[0]).toEqual({ id: 'Auto', name: 'Auto' });
-    expect(fallback).toHaveLength(10);
-    expect(fallback.some((o) => o.id === 'EN')).toBe(true);
+  it('returns [] when the model declares no languages (no fabricated list)', () => {
+    // The app's offline catalog declares no languages; the caller HIDES the
+    // picker. The old generic fallback offered "Auto"/ISO codes no worker was
+    // known to accept.
+    expect(normalizeTtsLanguageOptions(undefined)).toEqual([]);
+    expect(normalizeTtsLanguageOptions([])).toEqual([]);
+    expect(normalizeTtsLanguageOptions(null as any)).toEqual([]);
   });
 
   it('never emits "[object Object]" rows for object entries', () => {
@@ -157,20 +158,44 @@ describe('normalizeTtsVoiceOptions', () => {
     ]);
   });
 
-  it('falls back to the generic voice list only when NOTHING is declared', () => {
-    // The app's offline catalog declares neither voices nor languages.
-    const options = normalizeTtsVoiceOptions(null, '');
-    expect(options).toEqual([
-      { id: 'Claire', name: 'Claire' },
+  it('returns [] when NOTHING is declared — never a static fallback', () => {
+    // chatterbox / harmonyspeech single-speaker mode: the worker ignores or
+    // rejects `voice` here, so the picker must not be offered at all.
+    expect(normalizeTtsVoiceOptions(null, '')).toEqual([]);
+    expect(normalizeTtsVoiceOptions(undefined, '')).toEqual([]);
+    // A model with languages but no voices at all must not invent any either.
+    expect(normalizeTtsVoiceOptions({ languages: ['default'] }, '')).toEqual([]);
+    // An empty scoped set is authoritative — don't borrow other languages'.
+    expect(
+      normalizeTtsVoiceOptions(
+        { languages: [{ code: 'EN' }, { code: 'ZH', voices: ['Mandarin'] }] },
+        'EN',
+      ),
+    ).toEqual([]);
+  });
+
+  it('scopes soulvoice `{voice, language}` descriptors to the selected language', () => {
+    const speechOptions = {
+      voices: [
+        { voice: 'EN-Newest', language: 'EN' },
+        { voice: 'whispering', language: 'EN', styles: ['whisper'] },
+        { voice: 'Mandarin', language: 'ZH' },
+        // Language-agnostic descriptors survive every scope.
+        { voice: 'Bella' },
+      ],
+    };
+    expect(normalizeTtsVoiceOptions(speechOptions, 'ZH')).toEqual([
+      { id: 'Mandarin', name: 'Mandarin' },
       { id: 'Bella', name: 'Bella' },
-      { id: 'Nova', name: 'Nova' },
-      { id: 'Alloy', name: 'Alloy' },
-      { id: 'Echo', name: 'Echo' },
-      { id: 'Shimmer', name: 'Shimmer' },
     ]);
-    // A model with languages but no voices at all still gets the fallback
-    // (its language entry carries no scoped set).
-    expect(normalizeTtsVoiceOptions({ languages: ['default'] }, '')).toEqual(options);
+    // Case-insensitive language match; the voice ids stay exact-cased.
+    expect(normalizeTtsVoiceOptions(speechOptions, ' en ')).toEqual([
+      { id: 'EN-Newest', name: 'EN-Newest' },
+      { id: 'whispering', name: 'whispering' },
+      { id: 'Bella', name: 'Bella' },
+    ]);
+    // No language selected → all descriptors (union).
+    expect(normalizeTtsVoiceOptions(speechOptions, '')).toHaveLength(4);
   });
 
   it('prefers flat voices over per-language entries with no scoped match', () => {

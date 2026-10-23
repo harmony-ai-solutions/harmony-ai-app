@@ -46,7 +46,6 @@ import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityC
 import {
   catalogModelsForModule,
   findModel,
-  getSpeechOptions,
   resolveEffectiveSpeechOptions,
   isSamplingParamKey,
   isParamSupported,
@@ -72,12 +71,20 @@ const VOICE_PROFILE_PROVIDERS = ['soulvoice', 'soulbitscloud'];
 /** TTS providers with a voice cloning / voice design workflow. */
 const VOICE_CLONE_PROVIDERS = ['soulbitscloud', 'soulvoice', 'elevenlabs'];
 
-/** TTS providers that get the side-by-side Language + Base Voice dropdowns. */
+/** TTS providers that get the model-gated Language + Base Voice dropdowns. */
 const SOUL_TTS_PROVIDERS = ['soulbitscloud', 'soulvoice'];
 
-/** Fallback picker lists when the model metadata declares none. */
-const FALLBACK_TTS_LANGUAGES = ['Auto', 'EN', 'DE', 'FR', 'ES', 'IT', 'PT', 'JA', 'KO', 'ZH'];
-const FALLBACK_TTS_VOICES = ['Claire', 'Bella', 'Nova', 'Alloy', 'Echo', 'Shimmer'];
+/*
+ * TTS Language / Base Voice options are ONLY ever derived from the selected
+ * model's `meta.speech_options` (via `resolveEffectiveSpeechOptions`).
+ *
+ * There is deliberately NO static fallback list. The old generic values
+ * ("Claire", "Nova", "Alloy", "Echo", "Auto", …) were rendered for models that
+ * declare no voices at all — for chatterbox `voice` is silently ignored, and
+ * KittenTTS/OpenVoice reject an unknown id with `Voice 'X' not available`
+ * (research soulbits-model-defaults.md §0/§3/§7). A model that declares no
+ * voices now gets a cloning hint (or no row) instead of a fabricated list.
+ */
 
 /** Engine sentinel written when a slot is deliberately turned off. */
 const DISABLED_PROVIDER = 'disabled';
@@ -217,19 +224,36 @@ interface TtsVoiceOption {
   name: string;
 }
 
-/** Normalize one voice list: strings or objects keyed id/name/voice. */
-function collectVoiceOptions(list: unknown): TtsVoiceOption[] {
+/**
+ * Normalize one voice list: strings or descriptor objects keyed
+ * `id`/`name`/`voice`. When a language is selected, descriptors that carry a
+ * DIFFERENT `language` are dropped — soulvoice flattens HSE's nested
+ * `languages[].voices[]` into `{voice, language, styles}` descriptors, so the
+ * descriptor's own language is the per-language scope. Strings and
+ * language-agnostic descriptors always stay (they cannot be scoped).
+ */
+function collectVoiceOptions(list: unknown, selectedLanguage = ''): TtsVoiceOption[] {
   if (!Array.isArray(list)) return [];
   return list
-    .map((raw): TtsVoiceOption => {
+    .map((raw): TtsVoiceOption | null => {
       if (typeof raw === 'string') {
-        return { id: raw, name: raw };
+        return raw === '' ? null : { id: raw, name: raw };
       }
-      const entry = (raw ?? {}) as { id?: unknown; name?: unknown; voice?: unknown };
-      const id = String(entry.id ?? entry.name ?? entry.voice ?? '');
+      const entry = (raw ?? {}) as {
+        id?: unknown;
+        name?: unknown;
+        voice?: unknown;
+        language?: unknown;
+      };
+      const id = String(entry.id ?? entry.name ?? entry.voice ?? '').trim();
+      if (id === '') return null;
+      if (selectedLanguage) {
+        const language = String(entry.language ?? '').trim().toLowerCase();
+        if (language !== '' && language !== selectedLanguage) return null;
+      }
       return { id, name: String(entry.name ?? id) };
     })
-    .filter((voice) => voice.id !== '');
+    .filter((voice): voice is TtsVoiceOption => voice !== null);
 }
 
 /** The descriptor id of a language entry (gateway `code`, soulvoice name, …). */
@@ -244,12 +268,15 @@ function languageScopeId(entry: TtsLanguageScope): string {
  *  - soulbitscloud gateway: descriptors — `[{code, name, voices}, …]`
  * `String(code)` over the gateway's objects produced the "[object Object]"
  * rows (owner report, 2026-10-22) — the id is now read from the fields.
+ *
+ * Returns `[]` when the model declares no languages: the caller HIDES the
+ * picker rather than offering a fabricated language list (a wrong language
+ * hard-fails the worker on KittenTTS and mislabels every other family).
  */
 export function normalizeTtsLanguageOptions(
   languages: SpeechOptionsMeta['languages'],
 ): Array<{ id: string; name: string }> {
-  const list =
-    languages && languages.length > 0 ? languages : FALLBACK_TTS_LANGUAGES;
+  const list = Array.isArray(languages) ? languages : [];
   return list
     .map((entry) => {
       if (typeof entry === 'string') {
@@ -273,10 +300,13 @@ export function normalizeTtsLanguageOptions(
  *    to the generic list — the "voices never change with the model" report,
  *    owner 2026-10-22)
  *  - per-language voice scopes: when the model declares NO flat voices, the
- *    languages' own `voices` arrays are the source. A language that declares
- *    its own set SCOPES the picker to that set (Chatterbox Multilingual);
- *    with no language selected the union of every language's voices is shown.
- * Falls back to the generic list only when the model declares neither.
+ *    languages' own `voices` arrays are the source. A selected language that
+ *    declares its own set SCOPES the picker to that set (Chatterbox
+ *    Multilingual / OpenVoice); with no language selected the union of every
+ *    language's voices is shown.
+ *
+ * An EMPTY result is meaningful: the model declares no voices (chatterbox /
+ * harmonyspeech single-speaker mode), and the caller must not invent any.
  */
 export function normalizeTtsVoiceOptions(
   speechOptions: SpeechOptionsMeta | null | undefined,
@@ -287,29 +317,38 @@ export function normalizeTtsVoiceOptions(
     typeof entry === 'object' && entry !== null ? [entry as TtsLanguageScope] : [],
   );
 
-  // A selected language that declares its own voice set scopes the picker.
   const scoped = languageEntries.find((entry) => {
     const id = languageScopeId(entry);
     return id !== '' && id.toLowerCase() === selected;
   });
-  if (scoped && Array.isArray(scoped.voices) && (scoped.voices as unknown[]).length > 0) {
-    return collectVoiceOptions(scoped.voices);
+
+  if (selected) {
+    // A selected language that declares its own voice set scopes the picker.
+    if (scoped && Array.isArray(scoped.voices) && (scoped.voices as unknown[]).length > 0) {
+      return collectVoiceOptions(scoped.voices, selected);
+    }
+
+    // Flat (language-agnostic) voices — KittenTTS / soulvoice descriptors.
+    const flat = collectVoiceOptions(speechOptions?.voices, selected);
+    if (flat.length > 0) return flat;
+
+    // A matched language that declares an EMPTY set is authoritative — never
+    // borrow another language's voices for it (the worker would reject them).
+    if (scoped) return [];
   }
 
-  // Union: the flat list plus every language's scoped voices.
-  let flat = collectVoiceOptions(speechOptions?.voices);
-  for (const entry of languageEntries) {
-    flat = flat.concat(collectVoiceOptions(entry.voices));
-  }
+  // No language selected (or the stored value is not in the descriptor): the
+  // union of flat + every language's voices gives the picker something to show.
+  const union = [
+    ...collectVoiceOptions(speechOptions?.voices, selected),
+    ...languageEntries.flatMap((entry) => collectVoiceOptions(entry.voices, selected)),
+  ];
   const seen = new Set<string>();
-  const union = flat.filter((voice) => {
+  return union.filter((voice) => {
     if (seen.has(voice.id)) return false;
     seen.add(voice.id);
     return true;
   });
-  return union.length > 0
-    ? union
-    : FALLBACK_TTS_VOICES.map((voice) => ({ id: voice, name: voice }));
 }
 
 // ── Sibling components (Wave 2, same interfaces) ─────────────────────────────
@@ -888,6 +927,16 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
     '';
 
   // ── TTS: Language + Base Voice dropdowns (soulbitscloud / soulvoice) ──
+  //
+  // Both rows are gated on DECLARED metadata (research §0/§3/§7):
+  //  - Language renders only when the model declares `speech_options.languages`.
+  //    A single declared language is the only one the worker accepts
+  //    (KittenTTS: `default`) → a read-only locked row instead of a control
+  //    that can hard-fail synthesis.
+  //  - Base Voice renders only when the model declares voices (flat `voices[]`
+  //    or `languages[].voices` scoped by the selected language). Models with
+  //    no voice ids but a cloning pipeline (chatterbox / harmonyspeech) get a
+  //    muted hint instead; models with neither get no row at all.
   const renderTtsVoiceAndLanguage = () => {
     // A value saved while the descriptor bug was live can be the literal
     // "[object Object]" string (the old picker's option ids were
@@ -898,45 +947,139 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
     const languageValue = cleanPickerValue(String(state.capability.language ?? ''));
     const voiceValue = cleanPickerValue(String(state.capability.voice ?? ''));
 
-    const languageOptions = normalizeTtsLanguageOptions(speechOptions?.languages);
+    const declaredLanguageOptions = normalizeTtsLanguageOptions(speechOptions?.languages);
+    const declaredVoiceOptions = normalizeTtsVoiceOptions(speechOptions, languageValue);
+
+    const hasLanguages = declaredLanguageOptions.length > 0;
+    const hasVoices = declaredVoiceOptions.length > 0;
+    const languageLocked = declaredLanguageOptions.length === 1;
+
+    const supportsCloning =
+      speechOptions?.supports_voice_cloning === true ||
+      (speechOptions?.operation_modes ?? []).includes('voice_cloning');
+
+    // A seeded/saved value the descriptor omits is displayed as-is — never
+    // silently cleared (case-sensitive match: 'Bella' ≠ 'bella' for the worker).
+    const languageOptions = [...declaredLanguageOptions];
     if (languageValue && !languageOptions.some((o) => o.id === languageValue)) {
       languageOptions.push({ id: languageValue, name: languageValue });
     }
-
-    // Voice list follows the model (and, on the gateway's per-language models,
-    // the selected language) — never the generic fallback while the model
-    // declares its own voices.
-    const voiceOptions = normalizeTtsVoiceOptions(speechOptions, languageValue);
+    const voiceOptions = [...declaredVoiceOptions];
     if (voiceValue && !voiceOptions.some((o) => o.id === voiceValue)) {
       voiceOptions.push({ id: voiceValue, name: voiceValue });
     }
 
+    const languageBlock = !hasLanguages ? null : languageLocked ? (
+      <View style={styles.halfCol}>
+        <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
+          {t('language')}
+        </ThemedText>
+        <View
+          testID={`tts-language-locked-${slot}`}
+          accessibilityLabel={`${t('language')}: ${languageValue || declaredLanguageOptions[0].id}`}
+          accessibilityState={{ disabled: true }}
+          style={[
+            styles.lockedRow,
+            {
+              borderColor: theme.colors.border.default,
+              backgroundColor: theme.colors.background.base,
+            },
+          ]}
+        >
+          <ThemedText size={13.5} numberOfLines={1} style={styles.lockedRowText}>
+            {languageValue || declaredLanguageOptions[0].name}
+          </ThemedText>
+          <Icon name="lock-outline" size={14} color={theme.colors.text.muted} />
+        </View>
+        <ThemedText variant="muted" size={11} style={styles.hint}>
+          {t('ttsLanguageLocked', { language: declaredLanguageOptions[0].name })}
+        </ThemedText>
+      </View>
+    ) : (
+      <View style={styles.halfCol}>
+        <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
+          {t('language')}
+        </ThemedText>
+        <SelectPicker
+          label={t('language')}
+          value={languageValue}
+          options={languageOptions}
+          onChange={(value) => onCapabilityChange('language', value)}
+          placeholder={t('language')}
+        />
+      </View>
+    );
+
+    const voiceBlock = hasVoices ? (
+      <View style={styles.halfCol}>
+        <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
+          {t('baseVoice')}
+        </ThemedText>
+        <SelectPicker
+          label={t('baseVoice')}
+          value={voiceValue}
+          options={voiceOptions}
+          onChange={(value) => onCapabilityChange('voice', value)}
+          placeholder={t('baseVoice')}
+        />
+      </View>
+    ) : supportsCloning ? (
+      // No voice ids in single-speaker mode (chatterbox / harmonyspeech): the
+      // speaker comes from the cloning workflow, so say so instead of showing
+      // a picker whose value the worker ignores or rejects.
+      <View style={styles.halfCol}>
+        <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
+          {t('baseVoice')}
+        </ThemedText>
+        <ThemedText
+          testID={`tts-default-speaker-hint-${slot}`}
+          variant="muted"
+          size={12}
+          style={styles.hint}
+        >
+          {t('ttsDefaultSpeakerHint')}
+        </ThemedText>
+      </View>
+    ) : null;
+
+    if (!languageBlock && !voiceBlock) return null;
+    if (!languageBlock || !voiceBlock) {
+      // A lone row keeps full width instead of sitting in a half-empty column.
+      return <View style={styles.fieldWrap}>{languageBlock ?? voiceBlock}</View>;
+    }
     return (
       <View style={styles.twoColRow}>
-        <View style={styles.halfCol}>
-          <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-            {t('language')}
-          </ThemedText>
-          <SelectPicker
-            label={t('language')}
-            value={languageValue}
-            options={languageOptions}
-            onChange={(value) => onCapabilityChange('language', value)}
-            placeholder={t('language')}
-          />
-        </View>
-        <View style={styles.halfCol}>
-          <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-            {t('baseVoice')}
-          </ThemedText>
-          <SelectPicker
-            label={t('baseVoice')}
-            value={voiceValue}
-            options={voiceOptions}
-            onChange={(value) => onCapabilityChange('voice', value)}
-            placeholder={t('baseVoice')}
-          />
-        </View>
+        {languageBlock}
+        {voiceBlock}
+      </View>
+    );
+  };
+
+  /**
+   * HarmonySpeech cannot synthesize without a speaker embedding — the worker
+   * fails single-speaker requests outright (research §3/§7). Surface that
+   * before the cloning UI so the user knows why there is no speaker picker.
+   */
+  const isHarmonySpeechModel =
+    isSoulTts && String(currentModelId).toLowerCase().includes('harmonyspeech');
+
+  const renderEmbeddingRequiredNotice = () => {
+    if (!isHarmonySpeechModel) return null;
+    return (
+      <View
+        testID={`tts-embedding-notice-${slot}`}
+        style={[
+          styles.noticeRow,
+          {
+            borderColor: theme.colors.status.warning + '66',
+            backgroundColor: theme.colors.status.warning + '14',
+          },
+        ]}
+      >
+        <Icon name="account-voice" size={16} color={theme.colors.status.warning} />
+        <ThemedText size={12} style={[styles.noticeText, { color: theme.colors.status.warning }]}>
+          {t('ttsEmbeddingRequiredNotice')}
+        </ThemedText>
       </View>
     );
   };
@@ -1022,6 +1165,9 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
 
           {/* 1 — Model, always first */}
           {modelField ? renderModelField(modelField) : null}
+
+          {/* 1b — HarmonySpeech needs an embedding: explain before the workflow */}
+          {renderEmbeddingRequiredNotice()}
 
           {/* 2 — Voice cloning / design workflows, immediately below the model */}
           {showVoiceClone && (
@@ -1296,6 +1442,27 @@ const styles = StyleSheet.create({
   fieldWrap: { marginBottom: 2 },
   fieldLabel: { marginBottom: 4 },
   fieldLabelInline: { marginBottom: 0, flexShrink: 1 },
+  lockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    minHeight: 38,
+    gap: 6,
+  },
+  lockedRowText: { flex: 1 },
+  noticeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  noticeText: { flex: 1, lineHeight: 16 },
   modelLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',

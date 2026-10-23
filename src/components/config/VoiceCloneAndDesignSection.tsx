@@ -492,18 +492,30 @@ export const VoiceCloneAndDesignSection: React.FC<
   if (isSoul) {
     if (!supportsCloning) return null;
     // Default to `voice_cloning` unless explicitly switched to `single_speaker_tts`
-    // (matches File 3 Tab 1 `let currentTtsMode = 'voice_cloning'`).
+    // (matches File 3 Tab 1 `let currentTtsMode = 'voice_cloning'`). HarmonySpeech
+    // cannot synthesize without a speaker embedding at all (research
+    // soulbits-model-defaults.md §3/§7), so a persisted single-speaker choice
+    // must not win there — and the single-speaker tab is hidden entirely.
+    const requiresEmbedding = String(selectedModel?.id ?? capability.model ?? '')
+      .toLowerCase()
+      .includes('harmonyspeech');
+    const singleSpeakerSupported =
+      operationModes.length === 0 || operationModes.includes('single_speaker_tts');
+    const allowSingleSpeaker = singleSpeakerSupported && !requiresEmbedding;
     const soulMode: SoulMode =
-      capability.operation_mode === 'single_speaker_tts'
+      capability.operation_mode === 'single_speaker_tts' && allowSingleSpeaker
         ? 'single_speaker_tts'
         : 'voice_cloning';
+    const soulModes = allowSingleSpeaker
+      ? SOUL_MODES
+      : SOUL_MODES.filter(([mode]) => mode === 'voice_cloning');
 
     return (
       <View style={styles.wrapper} testID="voice-clone-section">
         <ThemedText size={11} style={styles.fieldLabel}>
           Operation Mode (from model speech_options)
         </ThemedText>
-        {modeTabs('tts-operation-mode-tabs', SOUL_MODES, soulMode, (mode) =>
+        {modeTabs('tts-operation-mode-tabs', soulModes, soulMode, (mode) =>
           setCap('operation_mode', mode as SoulMode),
         )}
 

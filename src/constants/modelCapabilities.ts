@@ -193,9 +193,16 @@ export function getSpeechOptions(
  * Resolve the effective TTS `SpeechOptionsMeta` for a provider + model ID,
  * enriching sparse/cached catalog descriptors on `soulbitscloud` and
  * `soulvoice` so the UI always knows whether the model belongs to the
- * OpenVoice/HarmonySpeech family (`speed`, `pitch`, `energy`, `style`, `seed`)
- * or the Chatterbox family (`exaggeration`, `cfg_weight`, paralinguistic tags,
- * sampling params, `norm_loudness`) and exposes the Voice Cloning workflow.
+ * OpenVoice/HarmonySpeech family (`speed`/`pitch`/`energy`), the KittenTTS /
+ * OpenVoice families (`speed` only) or the Chatterbox family
+ * (`exaggeration`, `cfg_weight`, paralinguistic tags, sampling params).
+ *
+ * The family fallbacks mirror HSE's `prepare_*_inputs` exactly
+ * (research/soulbits-model-defaults.md §0/§7): the worker **raises** on
+ * cross-family params rather than ignoring them — `chatterbox_turbo` rejects
+ * `exaggeration`/`cfg_weight`/`min_p` outright, and plain `chatterbox`
+ * rejects `norm_loudness`/`top_k`. Advertising a rejected param as supported
+ * would render fields whose values 500 at synthesis time.
  */
 export function resolveEffectiveSpeechOptions(
   model: ModelInfoDto | null | undefined,
@@ -211,6 +218,7 @@ export function resolveEffectiveSpeechOptions(
   const isSoul = providerType === 'soulbitscloud' || providerType === 'soulvoice';
 
   if (slug.includes('chatterbox')) {
+    const turbo = slug.includes('turbo');
     return {
       ...declared,
       supports_voice_cloning: true,
@@ -222,26 +230,47 @@ export function resolveEffectiveSpeechOptions(
         '[chuckle]',
         '[clears throat]',
       ],
-      supported_generation_params: [
-        'exaggeration',
-        'cfg_weight',
-        'temperature',
-        'repetition_penalty',
-        'top_p',
-        'min_p',
-        'top_k',
-        'norm_loudness',
-        'seed',
-      ],
+      supported_generation_params: turbo
+        ? // Turbo raises on exaggeration/cfg_weight/min_p — norm_loudness is
+          // its one exposed knob (upstream default: on).
+          ['temperature', 'repetition_penalty', 'top_p', 'norm_loudness']
+        : // Plain/multilingual chatterbox raises on norm_loudness and top_k.
+          [
+            'exaggeration',
+            'cfg_weight',
+            'temperature',
+            'repetition_penalty',
+            'top_p',
+            'min_p',
+          ],
     };
   }
 
   if (isSoul) {
+    // KittenTTS and OpenVoice consume `speed` (and voice/language) only;
+    // HarmonySpeech adds pitch/energy. `style`/`seed` are no-ops everywhere.
+    const family: string[] = slug.includes('kitten')
+      ? ['speed']
+      : slug.includes('openvoice')
+        ? ['speed']
+        : slug.includes('harmonyspeech')
+          ? ['speed', 'pitch', 'energy']
+          : ['speed', 'pitch', 'energy', 'style', 'seed'];
+    // Voice cloning: OpenVoice/HarmonySpeech clone via speaker embeddings;
+    // KittenTTS has no cloning surface at all.
+    const clonable =
+      slug.includes('openvoice') || slug.includes('harmonyspeech') || slug === '';
     return {
       ...declared,
-      supports_voice_cloning: declared?.supports_voice_cloning ?? true,
-      operation_modes: declared?.operation_modes ?? ['single_speaker_tts', 'voice_cloning'],
-      supported_generation_params: ['speed', 'pitch', 'energy', 'style', 'seed'],
+      supports_voice_cloning: declared?.supports_voice_cloning ?? clonable,
+      // Only advertise `voice_cloning` when the family can actually clone —
+      // a model with no cloning pipeline must not get a cloning tab/CTA. The
+      // TTS voice picker also reads this to decide between a named-voice
+      // picker and the "use Voice Cloning" hint.
+      operation_modes:
+        declared?.operation_modes ??
+        (clonable ? ['single_speaker_tts', 'voice_cloning'] : ['single_speaker_tts']),
+      supported_generation_params: family,
     };
   }
 

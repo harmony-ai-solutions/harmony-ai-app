@@ -82,6 +82,9 @@
   "baseVoice": "Base Voice",
   "language": "Language",
   "voiceLiveCatalog": "Voice (/v2/voices live catalog)",
+  "ttsDefaultSpeakerHint": "Default speaker — use Voice Cloning to change it",
+  "ttsEmbeddingRequiredNotice": "This model can't do single-speaker TTS on its own — it needs a speaker embedding. Use Voice Cloning below to record or pick a reference sample.",
+  "ttsLanguageLocked": "This model only accepts \"{{language}}\".",
 
   "pipelineStages": "Pipeline Stages (Tap to configure)",
   "autoVadActive": "AutoVAD Active",
