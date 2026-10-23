@@ -45,6 +45,15 @@ import {
   getSpeechOptions,
 } from '../../constants/modelCapabilities';
 import type { FieldDefinition } from '../../constants/providerFieldSchemas';
+import { getProviderFieldsForModule } from '../../constants/providerFieldSchemas';
+import {
+  nextSoulbitsCapability,
+  SOULBITS_MODULE_DEFAULT_MODEL,
+} from '../../constants/soulbitsModelDefaults';
+import {
+  sanitizeNumericValues,
+  validateNumericFields,
+} from '../../utils/numericField';
 import {
   MODULE_TYPES,
   ModuleTypeConfig,
@@ -125,6 +134,25 @@ function parseCapability(value: unknown): Record<string, any> {
   return {};
 }
 
+/**
+ * Clamp-on-load repair for a persisted capability overlay: finite numbers are
+ * pulled into the provider's declared field bounds (legacy configs saved by
+ * the pre-validation inputs could hold temperature 5, threshold 99, NaN…),
+ * NaN becomes unset. Returns the repaired overlay plus the keys that changed
+ * so the caller can mark them user-explicit (a visible override, not a silent
+ * rewrite).
+ */
+function sanitizeLoadedCapability(
+  providerType: string,
+  modelModuleType: string,
+  capability: Record<string, any>,
+): { capability: Record<string, any>; changed: string[] } {
+  if (!providerType) return { capability, changed: [] };
+  const fields = getProviderFieldsForModule(providerType, modelModuleType);
+  const { values, changed } = sanitizeNumericValues(fields, capability);
+  return { capability: values as Record<string, any>, changed };
+}
+
 /** Serialize a capability overlay, dropping undefined values (stable '{}'). */
 function serializeCapability(values: Record<string, any>): string {
   const cleaned: Record<string, any> = {};
@@ -162,6 +190,30 @@ const MODULE_REPOSITORIES: Record<string, {
 };
 
 const EMPTY_SLOT: SlotState = { providerType: '', accountId: null, capability: {} };
+
+/** STT's Realtime Stream Buffer fields (Advanced-only; validated on save). */
+const STT_BUFFER_FIELDS: FieldDefinition[] = [
+  {
+    key: 'main_stream_time_millis',
+    label: 'Chunk Window (ms)',
+    type: 'number',
+    width: 'half',
+    placeholder: '2000',
+  },
+  {
+    key: 'transition_stream_time_millis',
+    label: 'Transition Overlap (ms)',
+    type: 'number',
+    width: 'half',
+    placeholder: '1000',
+  },
+  {
+    key: 'max_buffer_count',
+    label: 'Max Speech Chunks',
+    type: 'number',
+    placeholder: '5',
+  },
+];
 
 export const ModuleConfigEditScreen: React.FC = () => {
   const route = useRoute<ModuleConfigEditRouteProp>();
@@ -292,15 +344,24 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   if (!theme) return null;
 
-  const emptySlotFor = (providerType: string, modelModuleType: string): SlotState => ({
-    providerType,
-    accountId: null,
-    capability: capabilityDefaultsOf(
+  const emptySlotFor = (providerType: string, modelModuleType: string): SlotState => {
+    let capability = capabilityDefaultsOf(
       providerType,
       PROVIDER_DEFAULTS[providerType] ?? {},
       modelModuleType,
-    ),
-  });
+    );
+    // Soulbits Cloud: seed the module's default MODEL and its researched
+    // per-model defaults (a TTS slot must not carry the chat default
+    // `qwen-35-9b`; kitten-tts needs language="default", silero-vad its
+    // thresholds, …). Research: soulbits-model-defaults.md §6.
+    if (providerType === 'soulbitscloud') {
+      const defaultModel = SOULBITS_MODULE_DEFAULT_MODEL[modelModuleType];
+      if (defaultModel) {
+        capability = nextSoulbitsCapability(capability, defaultModel, modelModuleType);
+      }
+    }
+    return { providerType, accountId: null, capability };
+  };
 
   const loadConfig = async () => {
     // Accounts are shared across slots — load once (variant-filtered).
@@ -355,17 +416,40 @@ export const ModuleConfigEditScreen: React.FC = () => {
         for (const def of slotDefs) {
           const providerType: string = config[def.providerField] ?? '';
           const accountId: string | null = config[def.accountField] ?? null;
-          const capability = parseCapability(config[def.capabilityField]);
+          const loaded = parseCapability(config[def.capabilityField]);
+          const { capability, changed } = sanitizeLoadedCapability(
+            providerType,
+            def.modelModuleType,
+            loaded,
+          );
           nextSlots[def.slot] = { providerType, accountId, capability };
-          nextExplicit[def.slot] = explicitKeysFromPersisted(providerType, capability);
+          nextExplicit[def.slot] = {
+            ...explicitKeysFromPersisted(providerType, capability),
+            ...Object.fromEntries(changed.map((k) => [k, true])),
+          };
         }
         setSlots(nextSlots);
         setExplicitFields(nextExplicit);
+        // Clamp legacy out-of-range STT buffer values (e.g. from old inputs).
+        const bufferRepair = sanitizeNumericValues(STT_BUFFER_FIELDS, {
+          main_stream_time_millis: config.main_stream_time_millis,
+          transition_stream_time_millis: config.transition_stream_time_millis,
+          max_buffer_count: config.max_buffer_count,
+        });
+        setFormValues({
+          name: config.name,
+          ...bufferRepair.values,
+        });
       } else {
         const def = slotDefs[0];
         const providerType: string = config.provider ?? '';
         const accountId: string | null = config.provider_account_id ?? null;
-        const capability = parseCapability(config.capability_json);
+        const loaded = parseCapability(config.capability_json);
+        const { capability, changed } = sanitizeLoadedCapability(
+          providerType,
+          def.modelModuleType,
+          loaded,
+        );
 
         const moduleFields = Object.fromEntries(
           Object.entries(config).filter(
@@ -380,10 +464,18 @@ export const ModuleConfigEditScreen: React.FC = () => {
               ].includes(k)
           )
         );
-        setFormValues({ name: config.name, ...moduleFields });
+        // Clamp legacy out-of-range module scalars (movement threshold etc.).
+        const moduleFieldDefs = (
+          MODULE_TYPES.find((m) => m.id === moduleType)?.moduleSpecificFields || []
+        );
+        const moduleRepair = sanitizeNumericValues(moduleFieldDefs, moduleFields);
+        setFormValues({ name: config.name, ...moduleRepair.values });
         setSlots({ [def.slot]: { providerType, accountId, capability } });
         setExplicitFields({
-          [def.slot]: explicitKeysFromPersisted(providerType, capability),
+          [def.slot]: {
+            ...explicitKeysFromPersisted(providerType, capability),
+            ...Object.fromEntries(changed.map((k) => [k, true])),
+          },
         });
       }
     } catch (error) {
@@ -442,13 +534,39 @@ export const ModuleConfigEditScreen: React.FC = () => {
   };
 
   const handleCapabilityChange = (slot: string, key: string, value: any) => {
-    setSlots((prev) => ({
-      ...prev,
-      [slot]: {
-        ...(prev[slot] ?? EMPTY_SLOT),
-        capability: { ...(prev[slot]?.capability ?? {}), [key]: value },
-      },
-    }));
+    const def = slotDefs.find((d) => d.slot === slot);
+    const modelModuleType = def?.modelModuleType ?? moduleType;
+    const prevSlot = slots[slot];
+    // Soulbits Cloud model switch: reseed the overlay from the new model's
+    // researched defaults. This also prunes keys HSE would REJECT (switching
+    // to chatterbox_turbo must drop exaggeration/cfg_weight — the worker
+    // raises on them, it does not ignore them) and module-foreign keys.
+    // Re-picking the SAME model keeps the user's edits untouched.
+    const isModelReseed =
+      prevSlot?.providerType === 'soulbitscloud' &&
+      key === 'model' &&
+      typeof value === 'string' &&
+      value !== '' &&
+      prevSlot.capability?.model !== value;
+
+    setSlots((prev) => {
+      const cur = prev[slot] ?? EMPTY_SLOT;
+      let capability: Record<string, any> = { ...(cur.capability ?? {}), [key]: value };
+      if (isModelReseed) {
+        capability = nextSoulbitsCapability(cur.capability ?? {}, value, modelModuleType);
+      }
+      return {
+        ...prev,
+        [slot]: { ...cur, capability },
+      };
+    });
+    if (isModelReseed) {
+      // The overlay was reseeded from the new model's defaults — a value
+      // tuned for the previous model must not masquerade as an explicit
+      // override of the new model's recommendation.
+      setExplicitFields((prev) => ({ ...prev, [slot]: {} }));
+      return;
+    }
     // A user edit is an explicit local value (overrides a preset — §11 A3).
     setExplicitFields((prev) => ({
       ...prev,
@@ -501,6 +619,56 @@ export const ModuleConfigEditScreen: React.FC = () => {
         showAlert(t('common:error'), t(key));
         return;
       }
+    }
+
+    // Numeric range sweep (floating-point validators): every declared number
+    // field must hold a finite value inside its min/max before we persist —
+    // the gateway passes values through opaquely, so out-of-range numbers
+    // only fail worker-side at runtime.
+    const numericProblems: string[] = [];
+    const pushIssues = (issues: ReturnType<typeof validateNumericFields>) => {
+      for (const issue of issues) {
+        if (issue.problem === 'nan') {
+          numericProblems.push(t('validationNumericNaN', { label: issue.label }));
+        } else if (issue.min !== undefined && issue.max !== undefined) {
+          numericProblems.push(
+            t('validationNumericRange', { label: issue.label, min: issue.min, max: issue.max }),
+          );
+        } else if (issue.min !== undefined) {
+          numericProblems.push(t('validationNumericMin', { label: issue.label, min: issue.min }));
+        } else if (issue.max !== undefined) {
+          numericProblems.push(t('validationNumericMax', { label: issue.label, max: issue.max }));
+        }
+      }
+    };
+    for (const def of slotDefs) {
+      const slotState = slots[def.slot];
+      if (!slotState?.providerType) continue;
+      pushIssues(
+        validateNumericFields(
+          getProviderFieldsForModule(slotState.providerType, def.modelModuleType),
+          slotState.capability ?? {},
+        ),
+      );
+    }
+    if (isSTT) {
+      pushIssues(validateNumericFields(STT_BUFFER_FIELDS, formValues));
+    } else {
+      pushIssues(
+        validateNumericFields(
+          MODULE_TYPES.find((m) => m.id === moduleType)?.moduleSpecificFields || [],
+          formValues,
+        ),
+      );
+    }
+    if (numericProblems.length > 0) {
+      const shown = numericProblems.slice(0, 3);
+      const more = numericProblems.length - shown.length;
+      showAlert(
+        t('common:error'),
+        shown.join('\n') + (more > 0 ? `\n+${more} more` : ''),
+      );
+      return;
     }
 
     setSaving(true);
@@ -929,29 +1097,16 @@ export const ModuleConfigEditScreen: React.FC = () => {
     if (isSTT) {
       // Realtime Stream Buffer & Overlap is an Advanced-only concern (Phase 3-6).
       if (!showAdvanced) return null;
-      const bufferFields: FieldDefinition[] = [
-        {
-          key: 'main_stream_time_millis',
-          label: t('chunkWindow'),
-          type: 'number',
-          width: 'half',
-          placeholder: '2000',
-        },
-        {
-          key: 'transition_stream_time_millis',
-          label: t('transitionOverlap'),
-          type: 'number',
-          width: 'half',
-          placeholder: '1000',
-        },
-        {
-          key: 'max_buffer_count',
-          label: t('maxSpeechChunks'),
-          type: 'number',
-          placeholder: '5',
-          tooltip: t('sttMaxSpeechChunksHint'),
-        },
-      ];
+      const bufferFields: FieldDefinition[] = STT_BUFFER_FIELDS.map((f) => ({
+        ...f,
+        label:
+          f.key === 'main_stream_time_millis'
+            ? t('chunkWindow')
+            : f.key === 'transition_stream_time_millis'
+              ? t('transitionOverlap')
+              : t('maxSpeechChunks'),
+        tooltip: f.key === 'max_buffer_count' ? t('sttMaxSpeechChunksHint') : undefined,
+      }));
 
       return (
         <ThemedCard elevated style={styles.section}>

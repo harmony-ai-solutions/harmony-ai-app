@@ -77,6 +77,7 @@ import {
 import { capabilityDefaultsOf } from '../../constants/accountFieldSchemas';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import { getFallbackModelsForModule } from '../../constants/soulbitsModels';
+import { nextSoulbitsCapability } from '../../constants/soulbitsModelDefaults';
 
 const log = createLogger('[SeedingEnsure]');
 
@@ -387,10 +388,26 @@ function defaultConfigName(): string {
   return i18n.t('providers:defaultConfigName');
 }
 
-/** The soulbitscloud capability overlay with the selected model applied. */
-function capabilityJson(model: string): string {
-  const overlay = capabilityDefaultsOf(SOULBITS, PROVIDER_DEFAULTS[SOULBITS] ?? {});
-  return JSON.stringify({ ...overlay, model });
+/**
+ * The soulbitscloud capability overlay for a seeded default config.
+ *
+ * Module-scoped (a TTS seed must not carry chat sampling keys — the old
+ * unscoped call leaked `temperature`/`max_tokens` into every module) and
+ * per-model (research/soulbits-model-defaults.md): known models overlay their
+ * researched defaults — kitten-tts seeds `language: "default"` + `voice:
+ * "Bella"` (both hard worker requirements), silero-vad its Silero thresholds,
+ * the LLMs their per-module sampling recommendations. Keys HSE would REJECT
+ * for the model are pruned by the same helper used on interactive model
+ * switches, so a seed can never 500 at synthesis time.
+ */
+function capabilityJson(model: string, moduleType: string): string {
+  const overlay = capabilityDefaultsOf(
+    SOULBITS,
+    PROVIDER_DEFAULTS[SOULBITS] ?? {},
+    moduleType,
+  );
+  if (!model) return JSON.stringify({ ...overlay, model: '' });
+  return JSON.stringify(nextSoulbitsCapability(overlay, model, moduleType));
 }
 
 /** Create `Soulbits Cloud (default)` for a single-provider module type. */
@@ -400,7 +417,7 @@ async function createDefaultModuleConfig(
   model: string,
 ): Promise<void> {
   const name = defaultConfigName();
-  const capability_json = capabilityJson(model);
+  const capability_json = capabilityJson(model, moduleType);
 
   switch (moduleType) {
     case 'backend':
@@ -481,10 +498,10 @@ async function createDefaultSTTConfig(
     max_buffer_count: stt.max_buffer_count,
     transcription_provider: SOULBITS,
     transcription_provider_account_id: accountId,
-    transcription_capability_json: capabilityJson(txModel ?? ''),
+    transcription_capability_json: capabilityJson(txModel ?? '', 'stt'),
     vad_provider: SOULBITS,
     vad_provider_account_id: accountId,
-    vad_capability_json: capabilityJson(vadModel ?? ''),
+    vad_capability_json: capabilityJson(vadModel ?? '', 'vad'),
   });
 }
 

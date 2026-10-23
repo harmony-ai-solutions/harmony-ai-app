@@ -229,7 +229,9 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
     voice: 'Bella',
     language: 'default',
     speed: 1.0,
-    format: 'mp3',
+    // HSE always encodes WAV at the model's native rate — `format` is never
+    // read worker-side (research/soulbits-model-defaults.md §7.8).
+    format: 'wav',
     image_aspect_ratio: '1:1',
     image_size: '1k',
   },

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { FieldDefinition } from '../../constants/providerFieldSchemas';
+import { clampToField, isCompleteNumber } from '../../utils/numericField';
 import { hapticLightPress } from '../../utils/haptics';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
@@ -32,27 +33,55 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
   const { theme } = useAppTheme();
   const [showPassword, setShowPassword] = useState(false);
   const [trackWidth, setTrackWidth] = useState(0);
+  // Raw text being typed into a number field (null = not focused). The draft
+  // exists so intermediate states ('', '0.', '-', '1e') never hit parseFloat:
+  // per-keystroke parseFloat over a controlled input ate decimal separators
+  // ('0' + '.' + '7' became 7) and bricked fields on NaN.
+  const [draft, setDraft] = useState<string | null>(null);
 
   if (!theme) return null;
 
-  const handleChange = (text: string) => {
-    let parsedValue: any = text;
-
-    if (field.type === 'number') {
-      if (text === '') {
-        // Clearing a sentinel-bearing input restores the sentinel (unlimited /
-        // random / auto), otherwise "unset".
-        parsedValue = field.disabledValue !== undefined ? field.disabledValue : null;
-      } else {
-        parsedValue = parseFloat(text);
-      }
+  /** Commit a parsed, clamped number for a COMPLETE numeric draft. */
+  const commitNumber = (text: string) => {
+    if (isCompleteNumber(text)) {
+      onChange(field.key, clampToField(parseFloat(text), field));
     }
+  };
 
-    onChange(field.key, parsedValue);
+  /**
+   * Number typing: update the draft; commit only complete numbers (clamped to
+   * the field's declared min/max/step). Clearing commits the sentinel
+   * (unlimited/random/auto) or null. Partial/garbage drafts keep the last
+   * committed value until blur reverts or completes them.
+   */
+  const handleNumberChange = (text: string) => {
+    setDraft(text);
+    if (text === '') {
+      onChange(field.key, field.disabledValue !== undefined ? field.disabledValue : null);
+    } else {
+      commitNumber(text);
+    }
+  };
+
+  /** Blur: finalize the draft — complete commits, partial/garbage reverts. */
+  const finalizeNumber = () => {
+    if (draft === null) return;
+    const text = draft;
+    setDraft(null);
+    if (text.trim() !== '') commitNumber(text);
+  };
+
+  const handleChange = (text: string) => {
+    if (field.type === 'number') {
+      handleNumberChange(text);
+      return;
+    }
+    onChange(field.key, text);
   };
 
   /** Numeric display value, hiding the sentinel so the placeholder shows. */
   const numericDisplayValue = (): string => {
+    if (draft !== null) return draft;
     if (value === null || value === undefined || value === '') return '';
     if (field.disabledValue !== undefined && Number(value) === field.disabledValue) {
       return '';
@@ -122,6 +151,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             style={styles.sliderValueInput}
             value={numericDisplayValue()}
             onChangeText={handleChange}
+            onBlur={finalizeNumber}
             placeholder={field.placeholder}
             keyboardType="decimal-pad"
             editable={!readOnly}
@@ -262,6 +292,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             ]}
             value={numericDisplayValue()}
             onChangeText={handleChange}
+            onBlur={finalizeNumber}
             placeholder={field.placeholder}
             keyboardType="decimal-pad"
             editable={!readOnly}

@@ -4,6 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { EXTENDED_PARAMS, ExtendedParamInfo, STANDARD_PARAM_KEYS } from '../../constants/extendedParamMetadata';
 import { parseExtraParams, serializeExtraParams } from '../../utils/configHelpers';
+import { isCompleteNumber } from '../../utils/numericField';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 
@@ -11,6 +12,59 @@ interface AdvancedSamplingParamsProps {
   extraParamsJson: string;
   onChange: (jsonString: string) => void;
 }
+
+/**
+ * Draft-buffered numeric input for one extended param. The old
+ * `parseFloat(text) || 0` per keystroke made negatives untypable ('-' → 0,
+ * then '1' → '01' → 1) and ate decimal separators; the draft only commits
+ * complete numbers, and blur reverts partial/garbage input. Clearing + blur
+ * removes the param.
+ */
+const NumberParamInput: React.FC<{
+  value: any;
+  onCommit: (next: number) => void;
+  onRemove: () => void;
+}> = ({ value, onCommit, onRemove }) => {
+  const { theme } = useAppTheme();
+  const [draft, setDraft] = useState<string | null>(null);
+  if (!theme) return null;
+
+  const display = draft !== null ? draft : value?.toString() || '';
+
+  const handleChange = (text: string) => {
+    setDraft(text);
+    if (isCompleteNumber(text)) onCommit(parseFloat(text));
+  };
+
+  const handleBlur = () => {
+    if (draft === null) return;
+    const text = draft;
+    setDraft(null);
+    if (text.trim() === '') {
+      onRemove();
+    } else if (isCompleteNumber(text)) {
+      onCommit(parseFloat(text));
+    }
+    // Partial/garbage → revert to the committed value.
+  };
+
+  return (
+    <TextInput
+      style={[
+        styles.numberInput,
+        {
+          color: theme.colors.text.primary,
+          borderColor: theme.colors.border.default,
+          backgroundColor: theme.colors.background.surface,
+        },
+      ]}
+      value={display}
+      onChangeText={handleChange}
+      onBlur={handleBlur}
+      keyboardType="decimal-pad"
+    />
+  );
+};
 
 export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
   extraParamsJson,
@@ -101,18 +155,10 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
               trackColor={{ false: theme.colors.border.default, true: theme.colors.accent.primary }}
             />
           ) : inputType === 'number' ? (
-            <TextInput
-              style={[
-                styles.numberInput,
-                {
-                  color: theme.colors.text.primary,
-                  borderColor: theme.colors.border.default,
-                  backgroundColor: theme.colors.background.surface,
-                },
-              ]}
-              value={value?.toString() || ''}
-              onChangeText={(text) => handleValueChange(key, parseFloat(text) || 0)}
-              keyboardType="decimal-pad"
+            <NumberParamInput
+              value={value}
+              onCommit={(next) => handleValueChange(key, next)}
+              onRemove={() => handleRemove(key)}
             />
           ) : (
             <TextInput
