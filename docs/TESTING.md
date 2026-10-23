@@ -1,5 +1,16 @@
 # Testing Strategy
 
+> **UPDATE (2026-10-23, cloud engine-key ensure):** the `soulbitscloud` engine
+> credential moved from the ≤1h account PASETO to a long-lived `sb_cloud_*` API
+> key named "Soulbits Engine". New suite
+> `src/services/cloud/__tests__/engineKeyEnsure.test.ts` covers
+> find-and-reuse, mint-on-missing, newest-wins on duplicate names, write-once,
+> the 5-key cap (no retry), signed-out no-op and single-flight. The
+> `soulbitsTokenSync` and provider `seeding` suites were reworked to the new
+> behavior (the stale-PASETO skip no longer applies to the key path; signed-out
+> remains a no-op). Current baseline: **220 unit suites / 2231 tests** (single
+> `unit` project).
+
 > **UPDATE (2026-10-19, provider-registry 7-1):** the suite grew with the
 > provider-registry workstream. New/updated suites cover the shared **provider
 > accounts** model (`ProvidersScreen`, `AccountForm`, the `providers` repository
