@@ -45,7 +45,7 @@
     "engine": "Engine version",
     "contract": "Management contract"
   },
-  "actionsSection": "Diagnostics",
+  "actionsSection": "Actions",
   "restart": "Restart engine",
   "stop": "Stop engine",
   "stopHint": "Until you open a chat again",
