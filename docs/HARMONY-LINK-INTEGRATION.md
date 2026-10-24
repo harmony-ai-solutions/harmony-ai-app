@@ -107,6 +107,31 @@ The engine authors the data; the app renders **optimistic pending rows** for its
 own outgoing messages (no app-authored ids, no SQLite mirror) and reconciles
 against engine reads.
 
+### Participant broadcast (per-entity POV copies)
+
+Every participant owns its own POV copy of a conversation. An AI entity authors
+its copy through cognition; the user's persona entity has no cognition, so the
+engine's Session Utterance Recorder persists the user-POV copy when an utterance
+is relayed onto the user session.
+
+`EntitySessionService` holds one session per participant and routes utterances
+through a `ParticipantBroadcastPolicy` (the app ships `ChatroomPolicy`):
+
+- **Outgoing** — a message the user sends goes to every active participant
+  session, including the app's own (user) session. The same client message id is
+  used on every socket.
+- **Incoming relay** — an `ENTITY_UTTERANCE` arriving on a cognition-bearing
+  session is relayed **verbatim** to the other local participant sessions
+  (notably the user session). An utterance arriving on the user's own session is
+  never relayed onward (that would re-enter the character's cognition), and a
+  bounded origin-id ring keeps duplicates/sync fan-out from being relayed twice.
+- **Readiness** — a greeting or fast reply can arrive before a participant
+  session finished `INIT_ENTITY`; relays are queued per destination and flushed
+  when that session becomes active (bounded, oldest dropped first).
+- **UI events** — `message:received` always carries the OWN session's interaction
+  id (the user-POV id the chat screen reads), so live updates pass the screen's
+  interaction guard.
+
 ## 5. Connection security modes
 
 The engine↔engine (LAN) transport supports three modes, selected per pairing:

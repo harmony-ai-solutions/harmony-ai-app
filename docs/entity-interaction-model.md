@@ -96,6 +96,7 @@ Defined in [`ConversationMessage`](src/services/engine/EngineApiClient.ts:468) (
 
 - One message inside an interaction: `content`, `message_type` (`text` / `audio` / `image` / `greeting` …), optional media, emotional state.
 - **Crucially, it always carries a [`sender_entity_id`](src/services/engine/EngineApiClient.ts:471)** — the entity that said it. There is no nullable "the human typed this" flag.
+- **Each participant keeps its own POV copy** (`entity_id` = the POV owner, `sender_entity_id` = who spoke). AI entities author theirs through cognition; the user persona (no cognition) gets its copy from the engine's Session Utterance Recorder when the app relays the utterance onto the user's session. `origin_message_id` ties the copies of one wire message together and is unique per `(interaction_id, origin_message_id)`, so relays/sync echoes never duplicate a row.
 
 ### 3.5 Presence — where an entity lives (channels & plugins)
 

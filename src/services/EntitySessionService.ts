@@ -19,6 +19,12 @@ import { Interaction } from '../database/models';
 import AudioPlayer from './AudioPlayer';
 import { v7 as uuidv7 } from 'uuid';
 import { pushTokenStore } from './notifications/PushTokenStore';
+import { ChatroomPolicy } from './participantBroadcastPolicy';
+import type {
+  BroadcastParticipant,
+  ParticipantBroadcastPolicy,
+  RoutedUtterance,
+} from './participantBroadcastPolicy';
 
 const log = createLogger('[EntitySessionService]');
 
@@ -37,6 +43,24 @@ const MAX_INIT_ENTITY_RETRIES = 2;
  * client/engine clock differences without matching stale identical texts.
  */
 const RECONCILE_SKEW_MS = 10_000;
+
+/**
+ * Participant broadcast (design §A): loop-safety bounds.
+ *
+ * RELAY_ORIGIN_LRU_MAX — origin message ids already observed/relayed on this
+ *   device. One entry per incoming utterance; the ring keeps a re-delivered
+ *   fan-out or a duplicate relay from being forwarded twice.
+ * RELAY_QUEUE_MAX — per-destination queue for utterances that arrived before
+ *   that participant session finished INIT (a greeting can land ~500 ms after
+ *   the character's INIT while the user's INIT is still in flight). Bounded so
+ *   a permanently un-started session cannot grow memory; oldest is dropped.
+ * RELAY_ACK_WAITER_MAX — relays awaiting their engine ack (SUCCESS = the POV
+ *   row is persisted) to fire the post-persist UI nudge. Acks land within
+ *   milliseconds of the write; the cap only guards a pathological case.
+ */
+const RELAY_ORIGIN_LRU_MAX = 512;
+const RELAY_QUEUE_MAX = 100;
+const RELAY_ACK_WAITER_MAX = 256;
 
 /** Engine ingestion-rejection code for an entity the engine hasn't ingested yet. */
 const INIT_ENTITY_INGESTION_ERROR = 'entity_not_defined';
@@ -148,6 +172,13 @@ export interface InteractionSession {
   connections: Map<string, {       // entityId -> connection info
     connectionId: string;           // 'entity-{entityId}[-{participantKey}]'
     status: 'connecting' | 'active' | 'disconnected';
+    /**
+     * Engine-advertised capabilities from INIT_ENTITY SUCCESS. `'cognition'`
+     * marks an AI participant that authors its own POV copy; the user persona
+     * has none, so an utterance relayed onto its session is recorded by the
+     * engine's Session Utterance Recorder. Empty until that response arrives.
+     */
+    capabilities?: string[];
   }>;
   pendingTranscriptions: Map<string, {
     messageId: string;
@@ -338,6 +369,38 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private pendingMessages: Map<string, PendingMessage[]> = new Map();
   private pendingCounter = 0;
 
+  /**
+   * Participant broadcast (design §A). The routing seam is replaceable; the
+   * phone ships the ChatroomPolicy (every participant sees every utterance).
+   */
+  private participantPolicy: ParticipantBroadcastPolicy = new ChatroomPolicy();
+  /**
+   * Origin message ids already OBSERVED/relayed on this device (bounded FIFO).
+   * Relaying is directional, but a duplicate delivery (sync fan-out, engine
+   * retry) must never forward the same origin twice.
+   */
+  private relayedOrigins: Set<string> = new Set();
+  private relayedOriginOrder: string[] = [];
+  /**
+   * Relay payloads waiting for their destination session to finish INIT, keyed
+   * by connection id. Connection ids are stable across the temp→canonical
+   * interaction-id swap, so a queue survives the re-key.
+   */
+  private relayQueues: Map<string, any[]> = new Map();
+
+  /**
+   * Relayed utterances awaiting their engine ack, keyed by the event_id the
+   * relay sent (participant-broadcast §A). The engine acks SUCCESS only after
+   * the Session Utterance Recorder committed the POV row; on that ack the UI
+   * gets a post-persist `message:received` nudge — the one emitted when the
+   * utterance first arrived races the persist (HTTP re-read vs WS write +
+   * engine insert). The session reference is read at ACK time: its
+   * interactionId may have been swapped to the engine's canonical id between
+   * relay and ack (the flush path relays before the swap lands).
+   */
+  private relayAckWaiters: Map<string, { session: InteractionSession; payload: any }> = new Map();
+  private relayAckWaiterOrder: string[] = [];
+
   private constructor() {
     super();
     this.connectionManager = ConnectionManager;
@@ -397,6 +460,186 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       }
     }
     return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Participant broadcast — policy seam, relay queue, origin dedupe (§A)
+  // ---------------------------------------------------------------------------
+
+  /** Project the interaction's sessions into the policy's participant shape. */
+  private broadcastParticipants(
+    session: InteractionSession,
+  ): BroadcastParticipant[] {
+    const participants: BroadcastParticipant[] = [];
+    for (const entityId of session.participantIds) {
+      const conn = session.connections.get(entityId);
+      if (!conn) continue;
+      participants.push({
+        entityId,
+        connectionId: conn.connectionId,
+        status: conn.status,
+        capabilities: conn.capabilities ?? [],
+        isOwn: entityId === session.ownEntityId,
+      });
+    }
+    return participants;
+  }
+
+  /** The utterance facts the routing policy may inspect. */
+  private routedUtterance(utterance: any): RoutedUtterance {
+    return {
+      messageId: typeof utterance?.message_id === 'string' ? utterance.message_id : '',
+      senderEntityId: typeof utterance?.entity_id === 'string' ? utterance.entity_id : '',
+      messageType:
+        typeof utterance?.message_type === 'string' ? utterance.message_type : undefined,
+    };
+  }
+
+  /**
+   * Record an origin message id and report whether it is NEW. Every incoming
+   * ENTITY_UTTERANCE is recorded (observed), so an event that first lands on
+   * one participant session is never relayed again if a duplicate delivery
+   * reaches the device (sync fan-out, engine retry).
+   */
+  private rememberRelayOrigin(messageId: string): boolean {
+    if (!messageId) return false;
+    if (this.relayedOrigins.has(messageId)) return false;
+    this.relayedOrigins.add(messageId);
+    this.relayedOriginOrder.push(messageId);
+    if (this.relayedOriginOrder.length > RELAY_ORIGIN_LRU_MAX) {
+      const oldest = this.relayedOriginOrder.shift();
+      if (oldest) this.relayedOrigins.delete(oldest);
+    }
+    return true;
+  }
+
+  /**
+   * Remember a relayed utterance until its engine ack arrives (bounded FIFO —
+   * see relayAckWaiters). Registered when the relay is WRITTEN; consumed when
+   * the ack arrives to emit the post-persist UI nudge.
+   */
+  private registerRelayAckWaiter(eventId: string, session: InteractionSession, payload: any): void {
+    if (!eventId) return;
+    this.relayAckWaiters.set(eventId, { session, payload });
+    this.relayAckWaiterOrder.push(eventId);
+    if (this.relayAckWaiterOrder.length > RELAY_ACK_WAITER_MAX) {
+      const oldest = this.relayAckWaiterOrder.shift();
+      if (oldest) this.relayAckWaiters.delete(oldest);
+    }
+  }
+
+  /** Queue a relay payload until its destination session reports ready. */
+  private enqueueRelay(connectionId: string, payload: any): void {
+    const queue = this.relayQueues.get(connectionId) ?? [];
+    queue.push(payload);
+    if (queue.length > RELAY_QUEUE_MAX) {
+      const dropped = queue.shift();
+      log.warn(
+        `Relay queue for ${connectionId} exceeded ${RELAY_QUEUE_MAX}; dropped oldest utterance ${dropped?.message_id ?? '?'}`,
+      );
+    }
+    this.relayQueues.set(connectionId, queue);
+    log.info(
+      `Queued relayed utterance ${payload?.message_id ?? '?'} for ${connectionId} until its session is ready`,
+    );
+  }
+
+  /**
+   * Flush relays queued for a destination session that just became active.
+   * Returns the last payload actually written to the socket (null when there
+   * was nothing to flush), so the caller can re-emit a UI refresh now that the
+   * POV row can be authored.
+   */
+  private async flushRelayQueue(
+    connectionId: string,
+    session: InteractionSession,
+  ): Promise<any | null> {
+    const queue = this.relayQueues.get(connectionId);
+    if (!queue || queue.length === 0) return null;
+    this.relayQueues.delete(connectionId);
+    log.info(`Flushing ${queue.length} queued relayed utterance(s) for ${connectionId}`);
+    let lastDelivered: any = null;
+    for (const payload of queue) {
+      try {
+        const eventId = await this.sendUtterance(connectionId, payload);
+        // Post-persist nudge: the ack fires once the engine committed the row.
+        this.registerRelayAckWaiter(eventId, session, payload);
+        lastDelivered = payload;
+      } catch (error) {
+        log.warn(
+          `Failed to flush relayed utterance ${payload?.message_id ?? '?'} to ${connectionId}:`,
+          error,
+        );
+      }
+    }
+    return lastDelivered;
+  }
+
+  /** Drop pending relays for a session that is going away. */
+  private clearRelayQueues(session: InteractionSession): void {
+    for (const [, conn] of session.connections) {
+      this.relayQueues.delete(conn.connectionId);
+    }
+  }
+
+  /**
+   * Relay an incoming utterance VERBATIM to the OTHER local participant
+   * sessions selected by the policy (notably the user session, where the engine
+   * recorder persists the user-POV copy). The payload object is passed through
+   * untouched — same MessageID (the recorder's idempotency key), MessageType,
+   * sender EntityId, content and audio.
+   *
+   * Destinations whose socket has not finished INIT are queued; the queue is
+   * flushed when that connection reports active.
+   */
+  private async relayIncomingUtterance(
+    session: InteractionSession,
+    receivingEntityId: string,
+    event: any,
+  ): Promise<void> {
+    const payload = event?.payload;
+    if (!payload) return;
+
+    const participants = this.broadcastParticipants(session);
+    const origin = participants.find(
+      participant => participant.entityId === receivingEntityId,
+    );
+    if (!origin) return;
+
+    const destinations = this.participantPolicy.routeIncoming(
+      this.routedUtterance(payload),
+      origin,
+      participants,
+    );
+    if (destinations.length === 0) return;
+
+    log.info(
+      `Relaying utterance ${payload.message_id ?? '?'} from ${receivingEntityId} to ${destinations.length} local session(s)`,
+    );
+
+    for (const connectionId of destinations) {
+      const destination = participants.find(
+        participant => participant.connectionId === connectionId,
+      );
+      if (!destination) continue;
+      if (destination.status === 'active') {
+        try {
+          const eventId = await this.sendUtterance(connectionId, payload);
+          // The engine acks SUCCESS only after the recorder committed the POV
+          // row — register the ack so the UI refresh can re-fire post-persist.
+          this.registerRelayAckWaiter(eventId, session, payload);
+        } catch (error) {
+          // Best-effort, like every other relay path: the POV copy backs the UI,
+          // not correctness of the conversation itself.
+          log.warn(
+            `Failed to relay utterance ${payload.message_id ?? '?'} to ${connectionId}:`,
+            error,
+          );
+        }
+      } else {
+        this.enqueueRelay(connectionId, payload);
+      }
+    }
   }
 
   /** Clean up all pending transcriptions for a given interaction. */
@@ -1201,6 +1444,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // Cancel any pending reconnect timers
       this.cancelReconnectsForInteraction(interactionId);
 
+      // Drop relays still waiting for this session's participants to start.
+      this.clearRelayQueues(session);
+
       // Disconnect ALL connections — fault-isolated per connection so one
       // failing disconnect can't strand the remaining connections (same leak
       // class as the audio error above). Intentional: no end-of-session event
@@ -1289,7 +1535,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     });
     log.info(`Registered optimistic text message ${messageId} for interaction ${interactionId}`);
 
-    // Send to ALL partner connections (participant-agnostic broadcast)
+    // Participant broadcast (design §A) — see routeOutgoing below.
     const utterance: any = {
       message_id: messageId,
       entity_id: session.ownEntityId,
@@ -1307,11 +1553,20 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       log.info(`Sending message ${messageId} with ${additionalEffects.emotionEffects.length} additional emotion effects`);
     }
 
-    for (const connectionId of partnerConnectionIds) {
+    // Participant broadcast (design §A): route through the policy instead of
+    // partner-connections-only. Sending the SAME payload to the app's OWN
+    // (user) session is what makes the engine's Session Utterance Recorder
+    // author the user-POV copy; the client-minted message_id is the idempotency
+    // key on both sockets. Fire-and-forget as before — no ack is awaited.
+    const recipients = this.participantPolicy.routeOutgoing(
+      this.routedUtterance(utterance),
+      this.broadcastParticipants(session),
+    );
+    for (const connectionId of recipients) {
       await this.sendUtterance(connectionId, utterance);
     }
 
-    log.info(`Sent message ${messageId} to ${partnerConnectionIds.length} partner(s) for interaction ${interactionId}`);
+    log.info(`Sent message ${messageId} to ${recipients.length} participant(s) for interaction ${interactionId}`);
   }
 
   /**
@@ -1551,16 +1806,21 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       image_mime_type: mimeType
     };
 
-    for (const connectionId of partnerConnectionIds) {
+    const recipients = this.participantPolicy.routeOutgoing(
+      this.routedUtterance(utterance),
+      this.broadcastParticipants(session),
+    );
+    for (const connectionId of recipients) {
       await this.sendUtterance(connectionId, utterance);
     }
 
-    log.info(`Sent image message ${messageId} to ${partnerConnectionIds.length} partner(s) for interaction ${interactionId}`);
+    log.info(`Sent image message ${messageId} to ${recipients.length} participant(s) for interaction ${interactionId}`);
   }
 
   /**
-   * Send a combined utterance (e.g., audio+text) to ALL partner connections
-   * in a participant-agnostic broadcast. Used by ChatDetailScreen for
+   * Send a combined utterance (e.g., audio+text) to ALL participant sessions
+   * (participant-agnostic broadcast; the own user session included, which lets
+   * the engine record the user-POV copy). Used by ChatDetailScreen for the
    * audio confirmation flow (handleConfirmAndSendMessage).
    */
   async sendCombinedMessage(
@@ -1577,14 +1837,25 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active partner connections for interaction ${interactionId}`);
     }
 
-    for (const connectionId of partnerConnectionIds) {
+    const recipients = this.participantPolicy.routeOutgoing(
+      this.routedUtterance(utterance),
+      this.broadcastParticipants(session),
+    );
+    for (const connectionId of recipients) {
       await this.sendUtterance(connectionId, utterance);
     }
 
-    log.info(`Sent combined message ${utterance.message_id} to ${partnerConnectionIds.length} partner(s) for interaction ${interactionId}`);
+    log.info(`Sent combined message ${utterance.message_id} to ${recipients.length} participant(s) for interaction ${interactionId}`);
   }
 
-  public async sendUtterance(connectionId: string, utterance: any): Promise<void> {
+  /**
+   * Sends an ENTITY_UTTERANCE event over the given connection. Resolves with
+   * the generated event_id once the frame is WRITTEN — NOT when the engine
+   * processed it; callers that must act on completion (the relay's
+   * post-persist UI nudge) consume the engine's ack instead
+   * (see registerRelayAckWaiter).
+   */
+  public async sendUtterance(connectionId: string, utterance: any): Promise<string> {
     const event = {
       event_id: this.generateEventId(),
       event_type: 'ENTITY_UTTERANCE',
@@ -1593,6 +1864,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     };
 
     await this.connectionManager.sendEvent(connectionId, event);
+    return event.event_id;
   }
 
   // ---------------------------------------------------------------------------
@@ -1779,6 +2051,35 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   ): Promise<void> {
     log.debug(`handleEntityEvent called for entity ${entityId}, event type: ${event.event_type}, status: ${event.status}`);
 
+    // Relay ack (participant-broadcast §A): the engine acks a relayed
+    // utterance SUCCESS only after the Session Utterance Recorder committed
+    // the POV row the chat screens read. The `message:received` emitted when
+    // the utterance first arrived races that persist (the screen's re-read
+    // fetch vs the WS write + engine insert), so re-emit AFTER the ack — keyed
+    // by the session's CURRENT interaction id (the canonical swap may have
+    // landed between relay and ack). Ack events carry the handler's result
+    // payload, not the utterance; the waiter holds the original.
+    if (event.status === 'SUCCESS' || event.status === 'ERROR') {
+      const waiter = this.relayAckWaiters.get(event.event_id);
+      if (waiter) {
+        this.relayAckWaiters.delete(event.event_id);
+        if (event.status === 'SUCCESS') {
+          const ackInteractionId = waiter.session.interactionId;
+          if (ackInteractionId) {
+            log.info(
+              `Relayed utterance ${waiter.payload?.message_id ?? '?'} acked — POV row persisted; nudging UI refresh`,
+            );
+            this.emit('message:received', ackInteractionId, waiter.payload);
+          }
+        } else {
+          log.warn(
+            `Relayed utterance ${waiter.payload?.message_id ?? '?'} errored engine-side — POV row NOT persisted`,
+          );
+        }
+        return;
+      }
+    }
+
     // First, try to find in pending sessions (for sessions still initializing)
     let targetSession = this.pendingSessions.get(entityId);
     let interactionSession: InteractionSession | null = null;
@@ -1900,8 +2201,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         break;
 
       case 'ENTITY_UTTERANCE':
-        // Handle incoming messages
-        await this.handleIncomingMessage(interactionSession, interactionId, event);
+        // Handle incoming messages (pass the RECEIVING session's entity: the
+        // relay direction is decided by which entity's session emitted this).
+        await this.handleIncomingMessage(interactionSession, interactionId, event, entityId);
         break;
 
       case 'ENTITY_UTTERANCE_EDIT':
@@ -1998,9 +2300,21 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         );
 
         const connection = interactionSession.connections.get(entityId);
+        let flushedRelayPayload: any | null = null;
         if (connection) {
+          // Participant broadcast: the engine advertises this session's modules
+          // here ('cognition' present = it authors its own POV; a user persona
+          // has none, so relayed utterances are recorded for it engine-side).
+          connection.capabilities = Array.isArray(event.payload?.capabilities)
+            ? [...event.payload.capabilities]
+            : [];
           connection.status = 'active';
           log.info(`Connection status updated to 'active' for ${entityId} in interaction ${interactionId}`);
+
+          // Relay readiness: utterances (a greeting, a fast reply) may have
+          // arrived before this participant finished INIT. Now that the engine
+          // holds its session + resolved interaction, deliver them.
+          flushedRelayPayload = await this.flushRelayQueue(connection.connectionId, interactionSession);
         }
 
         // If THIS is the own entity's response, swap the temp interactionId for
@@ -2056,6 +2370,19 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
             .map(([eid, conn]) => `${eid}=${conn.status}`)
             .join(', ');
           log.info(`Interaction session partially active: ${statuses}`);
+        }
+
+        // Participant broadcast: a flushed relay means a POV row was just
+        // handed to the engine AFTER the originating `message:received` already
+        // asked the screen to re-read (the greeting/response raced this INIT).
+        // Nudge the UI once more, now keyed by the canonical own interaction id,
+        // so the newly recorded user-POV row is picked up without a remount.
+        if (flushedRelayPayload) {
+          this.emit(
+            'message:received',
+            interactionSession.interactionId,
+            flushedRelayPayload,
+          );
         }
       } else {
         log.info(`Session ${entityId} activated, waiting for InteractionSession to be created`);
@@ -2149,6 +2476,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     interactionSession.failed = { error: errorMessage, at: Date.now() };
     this.emit('session:error', interactionId, errorMessage);
     this.cancelReconnectsForInteraction(interactionId);
+    this.clearRelayQueues(interactionSession);
 
     // Disconnect all connections for this interaction. The statuses are also
     // reset so a retained flagged session can never pass an all-active check
@@ -2260,10 +2588,22 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private async handleIncomingMessage(
     interactionSession: InteractionSession,
     interactionId: string,
-    event: any
+    event: any,
+    receivingEntityId: string,
   ): Promise<void> {
     try {
       log.info(`Incoming message from ${event.entity_id} in interaction ${interactionId}`);
+
+      // Only NEW utterances drive the UI refresh + relay. SUCCESS/ERROR copies
+      // are acks of events this app sent (relay acks are intercepted in
+      // handleEntityEvent; acks of our own outgoing sends carry the handler's
+      // result payload, not an utterance, and must not leak into the UI). A
+      // missing status is tolerated as NEW (the wire always carries status;
+      // historical callers omitted it).
+      if (event.status && event.status !== 'NEW') {
+        log.debug(`Ignoring non-NEW ENTITY_UTTERANCE (${event.status}) in interaction ${interactionId}`);
+        return;
+      }
 
       // Disabled entities cannot RECEIVE messages either — drop before they
       // reach the database (defense-in-depth; primary enforcement is the
@@ -2285,8 +2625,32 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // mirrors incoming utterances into SQLite. The event simply drives a UI
       // refresh; ChatDetailScreen re-reads the authoritative rows from the
       // engine and reconciles any pending outgoing rows against them.
-      this.emit('message:received', interactionId, event.payload);
+      //
+      // Participant broadcast (design §A): the UI event is keyed by the OWN
+      // session's interaction id — the user-POV id ChatDetailScreen's guard
+      // compares against (its route id). The receiving socket may belong to a
+      // different POV (the character's), whose engine interaction id must not
+      // leak into the app's per-POV session key.
+      this.emit(
+        'message:received',
+        interactionSession.interactionId || interactionId,
+        event.payload,
+      );
 
+      // Relay the SAME utterance to the other local participant sessions
+      // (notably the user session → engine Session Utterance Recorder). Only a
+      // cognition-bearing origin relays (directional rule, see ChatroomPolicy);
+      // a duplicate origin delivery is never relayed twice.
+      const originMessageId =
+        typeof event.payload?.message_id === 'string' ? event.payload.message_id : '';
+      const isNewOrigin = this.rememberRelayOrigin(originMessageId);
+      if (isNewOrigin && event.status === 'NEW') {
+        await this.relayIncomingUtterance(
+          interactionSession,
+          receivingEntityId || event.entity_id,
+          event,
+        );
+      }
     } catch (error) {
       log.error('Failed to handle incoming message:', error);
     }
