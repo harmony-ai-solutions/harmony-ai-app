@@ -56,25 +56,25 @@ export const SOULBITS_MODULE_DEFAULT_MODEL: Record<string, string> = {
 export const SOULBITS_MODEL_DEFAULTS: Record<string, Record<string, SoulbitsDefaultValue>> = {
   // ── LLM ────────────────────────────────────────────────────────────────
   'qwen-35-9b': {
-    temperature: 0.7, top_p: 0.8, max_tokens: 1024,
+    temperature: 0.7, top_p: 0.8, max_completion_tokens: 1024,
     frequency_penalty: 0, presence_penalty: 0,
-    max_completion_tokens: 0, seed: 0, n: 0,
+    seed: 0, n: 0,
     stop_tokens: '', response_format: '', sampling_preset_name: '',
   },
   // Derived: Mistral-Small-3.2-24B-Instruct base via the Starfallen merge.
   // Mistral's 0.15/1.00 is a benchmark setting — too greedy for roleplay.
   'starfallen-24b': {
-    temperature: 0.75, top_p: 0.95, max_tokens: 1024,
+    temperature: 0.75, top_p: 0.95, max_completion_tokens: 1024,
     frequency_penalty: 0, presence_penalty: 0,
-    max_completion_tokens: 0, seed: 0, n: 0,
+    seed: 0, n: 0,
     stop_tokens: '', response_format: '', sampling_preset_name: '',
   },
   // Google's standardized config: temp 1.0 / top_p 0.95 (top_k 64 not on the
   // schema). 1.0 runs hot for a companion — module overrides tone it down.
   'gemma4-meromero-26b-a4b': {
-    temperature: 1.0, top_p: 0.95, max_tokens: 1024,
+    temperature: 1.0, top_p: 0.95, max_completion_tokens: 1024,
     frequency_penalty: 0, presence_penalty: 0,
-    max_completion_tokens: 0, seed: 0, n: 0,
+    seed: 0, n: 0,
     stop_tokens: '', response_format: '', sampling_preset_name: '',
   },
 
@@ -132,27 +132,27 @@ export const SOULBITS_MODEL_UNSUPPORTED: Record<string, string[]> = {
 
 /**
  * Module-scoped sampling overrides — same model, different job. Chat stays
- * creative; cognition/movement/vision run cooler with capped max_tokens so
- * cheap classification turns don't burn the context budget.
+ * creative; cognition/movement/vision run cooler with a capped completion-token
+ * budget so cheap classification turns don't burn the context budget.
  */
 export const SOULBITS_MODEL_MODULE_OVERRIDES: Record<
   string,
   Partial<Record<ModuleCapabilityScope, Record<string, SoulbitsDefaultValue>>>
 > = {
   'qwen-35-9b': {
-    cognition: { temperature: 0.3, top_p: 0.8, max_tokens: 256 },
-    movement: { temperature: 0.2, top_p: 0.8, max_tokens: 256 },
-    vision: { temperature: 0.3, top_p: 0.8, max_tokens: 512 },
+    cognition: { temperature: 0.3, top_p: 0.8, max_completion_tokens: 256 },
+    movement: { temperature: 0.2, top_p: 0.8, max_completion_tokens: 256 },
+    vision: { temperature: 0.3, top_p: 0.8, max_completion_tokens: 512 },
   },
   'starfallen-24b': {
-    cognition: { temperature: 0.3, top_p: 0.9, max_tokens: 256 },
-    movement: { temperature: 0.2, top_p: 0.9, max_tokens: 192 },
+    cognition: { temperature: 0.3, top_p: 0.9, max_completion_tokens: 256 },
+    movement: { temperature: 0.2, top_p: 0.9, max_completion_tokens: 192 },
   },
   'gemma4-meromero-26b-a4b': {
-    backend: { temperature: 0.95, top_p: 0.95, max_tokens: 1024 },
-    cognition: { temperature: 0.3, top_p: 0.9, max_tokens: 256 },
-    movement: { temperature: 0.2, top_p: 0.9, max_tokens: 256 },
-    vision: { temperature: 0.2, top_p: 0.9, max_tokens: 512 },
+    backend: { temperature: 0.95, top_p: 0.95, max_completion_tokens: 1024 },
+    cognition: { temperature: 0.3, top_p: 0.9, max_completion_tokens: 256 },
+    movement: { temperature: 0.2, top_p: 0.9, max_completion_tokens: 256 },
+    vision: { temperature: 0.2, top_p: 0.9, max_completion_tokens: 512 },
   },
 };
 

@@ -73,6 +73,24 @@ describe('param support (R12 warnings)', () => {
     expect(isParamSupported(noTemp, 'top_p')).toBe(true);
     expect(isParamSupported(noTemp, 'temperature')).toBe(false);
   });
+
+  it('treats the completion-token aliases as ONE logical param', () => {
+    const legacyTokens: ModelInfoDto = {
+      id: 'tokens-1',
+      capabilities: ['chat'],
+      param_support: ['max_tokens'],
+    };
+    expect(isParamSupported(legacyTokens, 'max_completion_tokens')).toBe(true);
+    expect(isParamSupported(legacyTokens, 'max_tokens')).toBe(true);
+    expect(isParamSupported(legacyTokens, 'temperature')).toBe(false);
+
+    const canonicalTokens: ModelInfoDto = {
+      id: 'tokens-2',
+      capabilities: ['chat'],
+      param_support: ['max_completion_tokens'],
+    };
+    expect(isParamSupported(canonicalTokens, 'num_predict')).toBe(true);
+  });
 });
 
 describe('partitionFieldsBySupport', () => {
@@ -91,6 +109,21 @@ describe('partitionFieldsBySupport', () => {
     const { supportedFields, unsupportedFields } = partitionFieldsBySupport(fields, noTemp);
     expect(supportedFields.map((f) => f.key)).toEqual(['top_p']);
     expect(unsupportedFields.map((f) => f.key)).toEqual(['temperature', 'model']);
+  });
+
+  it('keeps the canonical completion-token field supported when the model declares an alias', () => {
+    const tokenFields = [{ key: 'max_completion_tokens' }, { key: 'temperature' }];
+    const legacyTokens: ModelInfoDto = {
+      id: 'tokens-1',
+      capabilities: ['chat'],
+      param_support: ['max_tokens'],
+    };
+    const { supportedFields, unsupportedFields } = partitionFieldsBySupport(
+      tokenFields,
+      legacyTokens,
+    );
+    expect(supportedFields.map((f) => f.key)).toEqual(['max_completion_tokens']);
+    expect(unsupportedFields.map((f) => f.key)).toEqual(['temperature']);
   });
 });
 

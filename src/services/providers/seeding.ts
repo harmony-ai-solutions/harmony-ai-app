@@ -408,8 +408,8 @@ function defaultConfigName(): string {
  * The soulbitscloud capability overlay for a seeded default config.
  *
  * Module-scoped (a TTS seed must not carry chat sampling keys — the old
- * unscoped call leaked `temperature`/`max_tokens` into every module) and
- * per-model (research/soulbits-model-defaults.md): known models overlay their
+ * unscoped call leaked `temperature`/the completion-token limit into every
+ * module) and per-model (research/soulbits-model-defaults.md): known models overlay their
  * researched defaults — kitten-tts seeds `language: "default"` + `voice:
  * "Bella"` (both hard worker requirements), silero-vad its Silero thresholds,
  * the LLMs their per-module sampling recommendations. Keys HSE would REJECT

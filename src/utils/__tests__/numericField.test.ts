@@ -67,8 +67,12 @@ describe('clampToField', () => {
   });
 
   it('is a no-op for fields without bounds', () => {
-    const maxTokens = { key: 'max_tokens', label: 'Max Tokens', type: 'number' as const };
-    expect(clampToField(99999, maxTokens)).toBe(99999);
+    const maxCompletionTokens = {
+      key: 'max_completion_tokens',
+      label: 'Max Completion Tokens',
+      type: 'number' as const,
+    };
+    expect(clampToField(99999, maxCompletionTokens)).toBe(99999);
   });
 });
 
@@ -94,7 +98,7 @@ describe('toFiniteNumber', () => {
 describe('validateNumericFields (save-time sweep)', () => {
   const fields = [
     { key: 'temperature', label: 'Temperature', type: 'number', min: 0, max: 2, step: 0.01 },
-    { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
+    { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', disabledValue: 0 },
     { key: 'seed', label: 'Seed', type: 'number', disabledValue: 0 },
     { key: 'model', label: 'Model', type: 'text' },
   ] as const;
@@ -115,7 +119,7 @@ describe('validateNumericFields (save-time sweep)', () => {
     expect(
       validateNumericFields(fields, {
         temperature: null,
-        max_tokens: -1,
+        max_completion_tokens: 0,
         seed: 0,
         model: 'gpt-4o',
       }),

@@ -9,6 +9,10 @@
  * understands, normalizing provider-specific aliases first
  * (`repeat_penalty` → `repetition_penalty`, `random_seed` → `seed`,
  * `num_predict` / `max_output_tokens` / `max_completion_tokens` → `max_tokens`).
+ *
+ * The completion-token limit is ONE logical value: when a capability carries
+ * more than one of its aliases, `max_completion_tokens` wins (engine contract),
+ * and the preset still emits the single `max_tokens` key.
  */
 
 /**
@@ -64,12 +68,36 @@ export const PRESET_YAML_KEYS: readonly string[] = [
 export const PRESET_KEY_ALIASES: Readonly<Record<string, string>> = {
   repeat_penalty: 'repetition_penalty',
   random_seed: 'seed',
+  // Completion-token aliases are resolved as ONE group (see
+  // TOKEN_LIMIT_PRECEDENCE) so `max_completion_tokens` deterministically wins.
   num_predict: 'max_tokens',
   max_output_tokens: 'max_tokens',
   max_completion_tokens: 'max_tokens',
 };
 
 const PRESET_KEY_SET: ReadonlySet<string> = new Set(PRESET_YAML_KEYS);
+
+/**
+ * Capability keys that all carry the SAME logical completion-token limit, in
+ * precedence order. `max_completion_tokens` wins when several are present
+ * (engine contract); preset YAML always emits the single `max_tokens` key.
+ */
+const TOKEN_LIMIT_PRECEDENCE: readonly string[] = [
+  'max_completion_tokens',
+  'max_tokens',
+  'num_predict',
+  'max_output_tokens',
+];
+
+/** True when a token-limit candidate carries a real limit (`> 0`). */
+function isSetTokenLimit(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    return value.trim() !== '' && Number.isFinite(numeric) && numeric > 0;
+  }
+  return false;
+}
 
 /**
  * Keys whose numeric `0` means "unset" (the form's disabled sentinel). A
@@ -186,10 +214,25 @@ export function buildPresetYamlFromCapability(
   }
 
   const candidates: Record<string, unknown> = {};
+  const tokenLimits: Record<string, unknown> = {};
   for (const [rawKey, value] of Object.entries(source)) {
+    if (TOKEN_LIMIT_PRECEDENCE.includes(rawKey)) {
+      tokenLimits[rawKey] = value;
+      continue;
+    }
     const key = PRESET_KEY_ALIASES[rawKey] ?? rawKey;
     if (!PRESET_KEY_SET.has(key)) continue;
     candidates[key] = value;
+  }
+
+  // ONE logical completion-token limit: `max_completion_tokens` wins over the
+  // legacy aliases when both are set (engine contract), independent of which
+  // blob they came from (extra_params vs top-level).
+  for (const rawKey of TOKEN_LIMIT_PRECEDENCE) {
+    if (isSetTokenLimit(tokenLimits[rawKey])) {
+      candidates.max_tokens = tokenLimits[rawKey];
+      break;
+    }
   }
 
   const lines: string[] = [];

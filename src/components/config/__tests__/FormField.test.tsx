@@ -8,7 +8,7 @@
  *    "NaN" — invalid drafts never commit and revert on blur;
  *  - out-of-range values used to pass straight through — commits are now
  *    clamped to the field's declared min/max;
- *  - clearing still restores the sentinel (`-1` unlimited / `0` auto) or null.
+ *  - clearing still restores the sentinel (`0` unset) or null.
  */
 
 import React from 'react';
@@ -67,12 +67,12 @@ const TEMPERATURE: FieldDefinition = {
   placeholder: '0.7',
 };
 
-const MAX_TOKENS: FieldDefinition = {
-  key: 'max_tokens',
-  label: 'Max Tokens',
+const MAX_COMPLETION_TOKENS: FieldDefinition = {
+  key: 'max_completion_tokens',
+  label: 'Max Completion Tokens',
   type: 'number',
-  placeholder: 'Unlimited',
-  disabledValue: -1,
+  placeholder: 'Default',
+  disabledValue: 0,
 };
 
 const renderNumberField = async (field: FieldDefinition, value: any = null) => {
@@ -147,9 +147,9 @@ describe('FormField number input — clamping', () => {
   });
 
   it('does not clamp fields without declared bounds', async () => {
-    const { onChange, input } = await renderNumberField(MAX_TOKENS);
+    const { onChange, input } = await renderNumberField(MAX_COMPLETION_TOKENS);
     await type(input, '65536');
-    expect(onChange).toHaveBeenLastCalledWith('max_tokens', 65536);
+    expect(onChange).toHaveBeenLastCalledWith('max_completion_tokens', 65536);
   });
 });
 
@@ -171,7 +171,7 @@ describe('FormField number input — garbage and NaN', () => {
       const [value, setValue] = React.useState<any>(null);
       return (
         <FormField
-          field={MAX_TOKENS}
+          field={MAX_COMPLETION_TOKENS}
           value={value}
           onChange={(_key, v) => setValue(v)}
           testID="num"
@@ -190,9 +190,9 @@ describe('FormField number input — garbage and NaN', () => {
 
 describe('FormField number input — clearing and sentinels', () => {
   it('restores the disabledValue sentinel when a sentinel-bearing field is cleared', async () => {
-    const { onChange, input } = await renderNumberField(MAX_TOKENS, 512);
+    const { onChange, input } = await renderNumberField(MAX_COMPLETION_TOKENS, 512);
     await type(input, '');
-    expect(onChange).toHaveBeenLastCalledWith('max_tokens', -1);
+    expect(onChange).toHaveBeenLastCalledWith('max_completion_tokens', 0);
     expect(displayed(input)).toBe(''); // sentinel hidden → placeholder shows
   });
 

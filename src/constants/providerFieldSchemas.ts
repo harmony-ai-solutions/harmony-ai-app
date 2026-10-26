@@ -54,6 +54,20 @@ export const OPENAI_TTS_VOICES: Array<{ id: string; name: string }> = [
   'verse',
 ].map((id) => ({ id, name: id }));
 
+/**
+ * The single logical completion-token limit per LLM endpoint.
+ *
+ * Every provider presents ONE field labelled {@link MAX_COMPLETION_TOKENS_LABEL};
+ * the ENGINE picks the wire parameter the model supports (`max_completion_tokens`
+ * → `max_tokens` → `num_predict` / `max_output_tokens`), so the app keeps the
+ * provider-native key where the engine already expects it and only presents a
+ * single, uniform control.
+ */
+export const MAX_COMPLETION_TOKENS_KEY = 'max_completion_tokens';
+export const MAX_COMPLETION_TOKENS_LABEL = 'Max Completion Tokens';
+export const MAX_COMPLETION_TOKENS_TOOLTIP =
+  'Per-request generation limit. The engine sends it using the parameter the model supports.';
+
 /** Shared aspect-ratio pills for the cloud image providers (Phase 3-8). */
 export const ASPECT_RATIO_OPTIONS: Array<{ id: string; name: string }> = [
   { id: '', name: 'Default' },
@@ -129,6 +143,33 @@ export function getProviderFieldsForModule(
 }
 
 /**
+ * Resolve the single logical completion-token limit for DISPLAY.
+ *
+ * Legacy capability overlays (written before the engine unified the limit) may
+ * carry only `max_tokens` while the dual-field providers now expose
+ * `max_completion_tokens`. On load, keep the canonical value when it is set and
+ * otherwise seed it from the legacy alias, so the one visible
+ * "Max Completion Tokens" input never renders empty while a limit is stored.
+ * Single-field providers (Mistral `max_tokens`, Ollama `num_predict`, Google
+ * `max_output_tokens`) keep their own key untouched.
+ */
+export function withCanonicalCompletionTokens<T extends Record<string, any>>(
+  providerType: string,
+  modelModuleType: string,
+  capability: T,
+): T {
+  const exposesCanonical = getProviderFieldsForModule(providerType, modelModuleType).some(
+    (field) => field.key === MAX_COMPLETION_TOKENS_KEY,
+  );
+  if (!exposesCanonical || !capability) return capability;
+  const current = Number(capability[MAX_COMPLETION_TOKENS_KEY]);
+  if (Number.isFinite(current) && current > 0) return capability;
+  const legacy = Number(capability.max_tokens);
+  if (!Number.isFinite(legacy) || legacy <= 0) return capability;
+  return { ...capability, [MAX_COMPLETION_TOKENS_KEY]: legacy };
+}
+
+/**
  * Capability-only provider field schemas (account fields removed — see the
  * module docblock). Keys match the 13 surviving provider types.
  */
@@ -138,12 +179,11 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-4o', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server. Preset values are applied server-side.', modules: LLM_CHAT_MODULES },
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'frequency_penalty', label: 'Frequency Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'stop_tokens', label: 'Stop Tokens', type: 'comma-list', placeholder: 'e.g. \\n, STOP', modules: LLM_CHAT_MODULES },
       { key: 'reasoning_effort', label: 'Reasoning Effort', type: 'select', modules: LLM_CHAT_MODULES, options: [
@@ -170,7 +210,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'model', label: 'Model', type: 'text', required: true, catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_k', label: 'Top K', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
@@ -179,7 +218,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'repetition_penalty', label: 'Repetition Penalty', type: 'number', step: 0.01, placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'frequency_penalty', label: 'Frequency Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'response_format', label: 'Response Format', type: 'text', placeholder: 'JSON string or empty', modules: LLM_CHAT_MODULES },
       { key: 'stop_tokens', label: 'Stop Tokens', type: 'comma-list', modules: LLM_CHAT_MODULES },
@@ -190,7 +229,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'google/gemini-flash-2.5', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_k', label: 'Top K', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
@@ -199,7 +237,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'repetition_penalty', label: 'Repetition Penalty', type: 'number', step: 0.01, placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'frequency_penalty', label: 'Frequency Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'response_format', label: 'Response Format', type: 'text', modules: LLM_CHAT_MODULES },
       { key: 'stop_tokens', label: 'Stop Tokens', type: 'comma-list', modules: LLM_CHAT_MODULES },
@@ -279,7 +317,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'model', label: 'Model', type: 'text', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
       // LocalAI's /v1 surface is a SUPERSET that also accepts the native names
@@ -290,7 +327,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'repeat_last_n', label: 'Repeat Last N', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'frequency_penalty', label: 'Frequency Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'reasoning_effort', label: 'Reasoning Effort', type: 'select', modules: LLM_CHAT_MODULES, options: [
         { id: '', name: 'Default' },
@@ -309,8 +346,11 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'mistral-large-4', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
-      // Mistral accepts `max_tokens` only — there is NO `max_completion_tokens`.
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', modules: LLM_CHAT_MODULES },
+      // `max_tokens` is this provider's native name; the engine accepts it as
+      // an alias for the single logical completion-token limit. `-1` stays the
+      // unset sentinel here because legacy rows already store -1 (a `0`
+      // sentinel would render those stored values as a literal "-1").
+      { key: 'max_tokens', label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       // Mistral temperature range is 0 ≤ x ≤ 1.5 (not OpenAI's 0–2).
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 1.5, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
@@ -347,7 +387,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'repeat_penalty', label: 'Repeat Penalty', type: 'number', step: 0.01, placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: 'Native name — not repetition_penalty.', modules: LLM_CHAT_MODULES },
       { key: 'repeat_last_n', label: 'Repeat Last N', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'num_ctx', label: 'Context Window (num_ctx)', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'num_predict', label: 'Max Tokens (num_predict)', type: 'number', placeholder: 'Unlimited', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'num_predict', label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: 'Sent as num_predict (Ollama native). ' + MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'stop', label: 'Stop', type: 'comma-list', placeholder: 'e.g. \\n, STOP', modules: LLM_CHAT_MODULES },
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'think', label: 'Think', type: 'select', tooltip: 'Thinking-capable models only (bool; native levels are model-defined).', modules: LLM_CHAT_MODULES, options: [
@@ -371,7 +411,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'model', label: 'Model', type: 'text', placeholder: 'gemini-2.5-flash', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
-      { key: 'max_output_tokens', label: 'Max Output Tokens', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'max_output_tokens', label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: 'Sent as max_output_tokens (Gemini native). ' + MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_k', label: 'Top K', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
@@ -399,12 +439,11 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       // the two pickers never appear side by side (Phase 3-8).
       { key: 'model', label: 'Model', type: 'text', placeholder: 'grok-3', catalog: true, modules: LLM_CHAT_MODULES },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'frequency_penalty', label: 'Frequency Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'response_format', label: 'Response Format', type: 'text', modules: LLM_CHAT_MODULES },
       { key: 'reasoning_effort', label: 'Reasoning Effort', type: 'select', modules: LLM_CHAT_MODULES, options: [
@@ -426,7 +465,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-20250514', catalog: true, modules: LLM_CHAT_MODULES },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', required: true, placeholder: '4096', width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'max_tokens', label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', required: true, placeholder: '4096', width: 'half', tooltip: 'Required by the Anthropic API. ' + MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_k', label: 'Top K', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
@@ -440,12 +479,11 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: 'Unlimited', disabledValue: -1, width: 'half', modules: LLM_CHAT_MODULES },
       // Shared by chat and TTS (the engine seeds one `seed` field per slot).
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: [...LLM_CHAT_MODULES, 'tts'] },
       { key: 'frequency_penalty', label: 'Frequency Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
-      { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'n', label: 'N', type: 'number', placeholder: '1 (default)', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'stop_tokens', label: 'Stop Tokens', type: 'comma-list', placeholder: 'e.g. \\n, <|im_end|>', modules: LLM_CHAT_MODULES },
       { key: 'response_format', label: 'Response Format', type: 'text', placeholder: 'JSON string or empty', modules: LLM_CHAT_MODULES },

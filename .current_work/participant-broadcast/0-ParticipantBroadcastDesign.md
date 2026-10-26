@@ -81,3 +81,29 @@ The engine could broadcast utterances to all local participant sessions itself (
 ## Repos / order
 
 Engine (harmony-link-private, `fix/desktop-sync`) first — the recorder is inert without the app relay, safe to ship ahead. Then app (harmony-ai-app, `main`). No backend changes; client repos untouched.
+
+## §D — POV backfill (Phase 2a): one-time migration 000057
+
+**Engine, uncommitted working tree.** The heal is a **one-time migration**, not a resident job — the owner's architectural decision: the root cause (no writer for the user-POV) is fixed by the recorder; a permanently-armed healing subroutine is surface area for a transient problem. It runs **inside migration `000057`** as the established D62 **GoUp hook** (`database/migration_pov_backfill.go`, registered for version 57 in `migrations.go` — same pattern as 000045/000051/000052). The `.up.sql` is a comment-only stub; a Go hook (not plain SQL) so the heal mints **UUIDv7 row ids** (`utils.GenerateMessageID` / `utils.GenerateID`) exactly like every other writer. The hook is self-contained inline SQL (no repository imports — the repo packages' tests import package `database`, which would be a test import cycle; every statement is a verbatim transplant of the reviewed repo helper it replaces).
+
+Direction is strictly one-way: **source = AI-entity POVs, target = user-persona POV**; the source is never written.
+
+**Algorithm (per private (AI entity → user persona) pair, each inside a SAVEPOINT):**
+
+1. Read the source POV transcript for the pair (private `participant_key`, oldest first, blobs included, dreams excluded).
+2. Compute the **seam**: the newest `created_at` already present in the *target* POV for that pair (`julianday()` so all three engine timestamp formats order correctly). Copy only source rows **strictly newer** than the seam. When the target has no rows (chat started during the window) every source row is newer.
+3. **Interactions:** if the target already has ANY interaction for the pair, attach every healed message to the newest one and bump its `last_activity_at` (never backwards; the fan-window read merges by `(entity, participant_key)`, so structural symmetry is not required). Only when it has none, mirror ONE source interaction: fresh id, `origin_interaction_id` = source id, copied participants/presence/status/timestamps. A pair with nothing healable mirrors nothing.
+4. **Messages:** fresh target row id; `entity_id` = target persona; **`sender_entity_id` copied verbatim** (your messages stay yours, claire's replies stay claire's in both POVs); content/media/`message_type`/emotional bits/timestamps copied; `origin_message_id` = **source row id**; born unread with empty action state (§9-A2). Insert with `ON CONFLICT(entity_id, origin_message_id) DO NOTHING`. A second, clock-skew-proof guard skips a source row whose wire origin is already present as a recorder-era target row.
+5. **Failure isolation:** a failing pair rolls back to its savepoint, is logged and skipped — one poisoned pair can never block the migration (and therefore never block DB open).
+
+Note on direction: post-000045 a private `participant_key` is the **symmetric sorted pair** (`claire+user`), identical in both POVs, so the mirror copies it verbatim rather than inverting it to a bare partner id (which would fabricate a bogus chat).
+
+**DDL (inside the hook, idempotent-guarded):** nullable `origin_interaction_id` on `interactions` + `UNIQUE(entity_id, origin_interaction_id)` (`idx_interactions_entity_origin`) — additive, Android-SQLite-mirrorable (`ADD COLUMN` + `CREATE UNIQUE INDEX`, no `DROP COLUMN`), mirroring 000056. NULLs are DISTINCT, so legacy rows coexist. No model/DTO surface is added: nothing engine-side reads the column (healed rows never sync — below), so the management contract and the repo/model layers are untouched.
+
+**One-time semantics, local only (verified in code).** Migration writes run on a dedicated connection (`runMigrationTx` → `GetConn`) that no changeset session is attached to, before recording starts — healed rows are **not changeset-captured and never sync**. Each device heals its own DB once, at its own upgrade; concurrent-heal collisions therefore cannot occur. Accepted consequence (owner decision): a device created *after* this migration ships (fresh DB: migrations run before sync pulls history, so the heal finds nothing) keeps the frozen window's gap on the user POV — recorder-era rows onward sync normally.
+
+**Hook idempotent-safety** (house rule, belt-and-braces beyond the version record): guarded DDL + the seam + origin-keyed inserts make a defensive re-run on a converged DB a no-op (pinned by test).
+
+**App impact: none.** The app reads the healed user-POV window through the existing chat-list/messages endpoints; recovered rows appear on the next chat open after the engine upgrade. No app code change. Healed rows are born unread — the chat list may badge healed chats until opened (one-time).
+
+**Risk to watch (greeting rows).** Healed rows preserve `message_type='greeting'`. The greeting-swiper is driven by the chat's greeting row + unseen state, not by row age; an ancient chat whose user-POV greeting is backfilled could make the swiper eligible again when reopened. Likely acceptable (it only re-offers alternate greetings), but worth an on-device check before shipping.

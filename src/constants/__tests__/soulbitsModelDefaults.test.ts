@@ -24,7 +24,7 @@ describe('SOULBITS_MODEL_DEFAULTS', () => {
     expect(SOULBITS_MODEL_DEFAULTS['qwen-35-9b']).toMatchObject({
       temperature: 0.7,
       top_p: 0.8,
-      max_tokens: 1024,
+      max_completion_tokens: 1024,
     });
     // Google's standardized generation config for the Gemma 4 base.
     expect(SOULBITS_MODEL_DEFAULTS['gemma4-meromero-26b-a4b']).toMatchObject({
@@ -40,6 +40,13 @@ describe('SOULBITS_MODEL_DEFAULTS', () => {
 
   it('keeps Qwen presence_penalty at 0 (documented 1.5 is a thinking-mode value that risks language mixing)', () => {
     expect(SOULBITS_MODEL_DEFAULTS['qwen-35-9b'].presence_penalty).toBe(0);
+  });
+
+  it('seeds the single canonical completion-token key (no legacy max_tokens)', () => {
+    for (const model of ['qwen-35-9b', 'starfallen-24b', 'gemma4-meromero-26b-a4b']) {
+      expect(SOULBITS_MODEL_DEFAULTS[model].max_tokens).toBeUndefined();
+      expect(SOULBITS_MODEL_DEFAULTS[model].max_completion_tokens).toBe(1024);
+    }
   });
 
   it('seeds only truthful TTS format/sample_rate values (HSE always emits WAV natively)', () => {
@@ -116,9 +123,9 @@ describe('SOULBITS_MODULE_DEFAULT_MODEL', () => {
 describe('SOULBITS_MODEL_MODULE_OVERRIDES', () => {
   it('runs cognition/movement cooler than chat with capped token budgets', () => {
     const qwen = SOULBITS_MODEL_MODULE_OVERRIDES['qwen-35-9b'];
-    expect(qwen?.cognition).toMatchObject({ temperature: 0.3, max_tokens: 256 });
-    expect(qwen?.movement).toMatchObject({ temperature: 0.2, max_tokens: 256 });
-    expect(qwen?.vision).toMatchObject({ temperature: 0.3, max_tokens: 512 });
+    expect(qwen?.cognition).toMatchObject({ temperature: 0.3, max_completion_tokens: 256 });
+    expect(qwen?.movement).toMatchObject({ temperature: 0.2, max_completion_tokens: 256 });
+    expect(qwen?.vision).toMatchObject({ temperature: 0.3, max_completion_tokens: 512 });
   });
 });
 
@@ -146,21 +153,35 @@ describe('nextSoulbitsCapability', () => {
 
   it('drops module-foreign keys (a TTS overlay never carries chat sampling)', () => {
     const next = nextSoulbitsCapability(
-      { model: 'qwen-35-9b', temperature: 0.7, top_p: 0.8, max_tokens: 1024, voice: 'Bella' },
+      {
+        model: 'qwen-35-9b',
+        temperature: 0.7,
+        top_p: 0.8,
+        max_completion_tokens: 1024,
+        voice: 'Bella',
+      },
       'kitten-tts-mini',
       'tts',
     );
     expect(next.temperature).toBeUndefined();
-    expect(next.max_tokens).toBeUndefined();
+    expect(next.max_completion_tokens).toBeUndefined();
     expect(next).toMatchObject({ model: 'kitten-tts-mini', voice: 'Bella', language: 'default' });
   });
 
   it('applies module-scoped sampling overrides for the same model', () => {
     const cognition = nextSoulbitsCapability({ model: 'qwen-35-9b' }, 'qwen-35-9b', 'cognition');
-    expect(cognition).toMatchObject({ temperature: 0.3, top_p: 0.8, max_tokens: 256 });
+    expect(cognition).toMatchObject({
+      temperature: 0.3,
+      top_p: 0.8,
+      max_completion_tokens: 256,
+    });
 
     const backend = nextSoulbitsCapability({ model: 'qwen-35-9b' }, 'qwen-35-9b', 'backend');
-    expect(backend).toMatchObject({ temperature: 0.7, top_p: 0.8, max_tokens: 1024 });
+    expect(backend).toMatchObject({
+      temperature: 0.7,
+      top_p: 0.8,
+      max_completion_tokens: 1024,
+    });
   });
 
   it('keeps the STT slot minimal (model only — no tunables on the schema)', () => {

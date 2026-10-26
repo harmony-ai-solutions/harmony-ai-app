@@ -93,6 +93,28 @@ export function isSamplingParamKey(key: string): boolean {
 }
 
 /**
+ * The engine accepts several wire names for the ONE logical completion-token
+ * limit. A model that declares ANY of them supports the single
+ * "Max Completion Tokens" field the UI now presents.
+ */
+const COMPLETION_TOKEN_LIMIT_ALIASES: ReadonlySet<string> = new Set([
+  'max_completion_tokens',
+  'max_tokens',
+  'max_output_tokens',
+  'num_predict',
+]);
+
+/** `declared.has(key)`, treating the completion-token aliases as one param. */
+function isDeclaredParam(declared: ReadonlySet<string>, key: string): boolean {
+  if (declared.has(key)) return true;
+  if (!COMPLETION_TOKEN_LIMIT_ALIASES.has(key)) return false;
+  for (const alias of COMPLETION_TOKEN_LIMIT_ALIASES) {
+    if (declared.has(alias)) return true;
+  }
+  return false;
+}
+
+/**
  * The set of parameters a model declares support for, or `null` when the model
  * declares NONE (sparse coverage ⇒ the caller emits no warning, R12 "undefined
  * ⇒ no warning").
@@ -128,7 +150,7 @@ export function partitionFieldsBySupport<T extends { key: string }>(
   const supportedFields: T[] = [];
   const unsupportedFields: T[] = [];
   for (const field of fields) {
-    if (supported.has(field.key)) supportedFields.push(field);
+    if (isDeclaredParam(supported, field.key)) supportedFields.push(field);
     else unsupportedFields.push(field);
   }
   return { supportedFields, unsupportedFields };
@@ -287,7 +309,7 @@ export function isParamSupported(
 ): boolean | null {
   const supported = supportedParams(model);
   if (!supported) return null;
-  return supported.has(key);
+  return isDeclaredParam(supported, key);
 }
 
 /** Find a model by id across a merged list (live preferred, then catalog). */

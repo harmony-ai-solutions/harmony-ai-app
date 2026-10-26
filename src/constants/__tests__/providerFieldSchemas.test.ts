@@ -5,7 +5,7 @@
  * elevenlabs speed (4-6), soulvoice Silero VAD keys (4-11).
  */
 
-import { PROVIDER_SCHEMAS } from '../providerFieldSchemas';
+import { PROVIDER_SCHEMAS, withCanonicalCompletionTokens } from '../providerFieldSchemas';
 
 const keys = (type: string): string[] =>
   (PROVIDER_SCHEMAS[type]?.fields ?? []).map(f => f.key);
@@ -87,5 +87,85 @@ describe('providerFieldSchemas — 6-5 capability additions', () => {
         'return_seconds',
       ]),
     );
+  });
+});
+
+describe('providerFieldSchemas — one logical completion-token limit', () => {
+  const TOKEN_KEYS = ['max_tokens', 'max_completion_tokens', 'num_predict', 'max_output_tokens'];
+  const tokenFields = (type: string) =>
+    (PROVIDER_SCHEMAS[type]?.fields ?? []).filter((f) => TOKEN_KEYS.includes(f.key));
+
+  it.each(['openai', 'openaicompatible', 'openrouter', 'localai', 'xai', 'soulbitscloud'])(
+    '%s exposes ONLY max_completion_tokens, labelled "Max Completion Tokens"',
+    (type) => {
+      const fields = tokenFields(type);
+      expect(fields).toHaveLength(1);
+      expect(fields[0]).toMatchObject({
+        key: 'max_completion_tokens',
+        label: 'Max Completion Tokens',
+        disabledValue: 0,
+      });
+      expect(fields[0].tooltip).toContain('engine sends it');
+    },
+  );
+
+  it.each([
+    ['mistral', 'max_tokens'],
+    ['ollama', 'num_predict'],
+    ['google', 'max_output_tokens'],
+    ['anthropic', 'max_tokens'],
+  ])('%s keeps its native alias key %s, relabelled', (type, key) => {
+    const fields = tokenFields(type);
+    expect(fields).toHaveLength(1);
+    expect(fields[0].key).toBe(key);
+    expect(fields[0].label).toBe('Max Completion Tokens');
+    expect(fields[0].tooltip).toBeTruthy();
+  });
+
+  it('no provider exposes "Max Tokens" / "Max Output Tokens" labels any more', () => {
+    for (const schema of Object.values(PROVIDER_SCHEMAS)) {
+      for (const schemaField of schema.fields) {
+        expect(schemaField.label).not.toBe('Max Tokens');
+        expect(schemaField.label).not.toBe('Max Output Tokens');
+        expect(schemaField.label).not.toBe('Max Tokens (num_predict)');
+      }
+    }
+  });
+});
+
+describe('withCanonicalCompletionTokens', () => {
+  it('seeds max_completion_tokens from a legacy max_tokens value', () => {
+    expect(withCanonicalCompletionTokens('openai', 'backend', { max_tokens: 2048 })).toMatchObject({
+      max_tokens: 2048,
+      max_completion_tokens: 2048,
+    });
+  });
+
+  it('keeps the canonical value when both are stored', () => {
+    const capability = { max_tokens: 2048, max_completion_tokens: 512 };
+    expect(
+      withCanonicalCompletionTokens('openai', 'backend', capability).max_completion_tokens,
+    ).toBe(512);
+  });
+
+  it('ignores unset sentinels (-1 / 0)', () => {
+    expect(
+      withCanonicalCompletionTokens('openai', 'backend', {
+        max_tokens: -1,
+        max_completion_tokens: 0,
+      }),
+    ).toEqual({ max_tokens: -1, max_completion_tokens: 0 });
+    expect(withCanonicalCompletionTokens('openai', 'backend', { max_tokens: 0 })).toEqual({
+      max_tokens: 0,
+    });
+  });
+
+  it('leaves single-field providers and non-chat modules untouched', () => {
+    expect(withCanonicalCompletionTokens('mistral', 'backend', { max_tokens: 512 })).toEqual({
+      max_tokens: 512,
+    });
+    expect(withCanonicalCompletionTokens('openai', 'tts', { max_tokens: 512 })).toEqual({
+      max_tokens: 512,
+    });
   });
 });

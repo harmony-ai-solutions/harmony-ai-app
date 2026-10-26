@@ -104,6 +104,24 @@ describe('buildPresetYamlFromCapability', () => {
     expect(fromGoogle).toBe('max_tokens: 128\n');
   });
 
+  it('prefers max_completion_tokens when both token aliases are present (ONE logical limit)', () => {
+    const yaml = buildPresetYamlFromCapability({ max_tokens: 512, max_completion_tokens: 1024 });
+    expect(yaml).toBe('max_tokens: 1024\n');
+
+    // The winner is canonical regardless of which blob it came from.
+    const fromExtra = buildPresetYamlFromCapability({
+      max_tokens: 512,
+      extra_params: JSON.stringify({ max_completion_tokens: 2048 }),
+    });
+    expect(fromExtra).toBe('max_tokens: 2048\n');
+    expect(fromExtra.match(/max_tokens:/g)).toHaveLength(1);
+  });
+
+  it('falls back to a legacy alias when the canonical value is unset', () => {
+    const yaml = buildPresetYamlFromCapability({ max_tokens: 768, max_completion_tokens: 0 });
+    expect(yaml).toBe('max_tokens: 768\n');
+  });
+
   it('emits the starter template when nothing is set', () => {
     expect(buildPresetYamlFromCapability({})).toBe(
       'temperature: 0.7\ntop_p: 0.9\ntop_k: 40\nrepetition_penalty: 1.1\n',

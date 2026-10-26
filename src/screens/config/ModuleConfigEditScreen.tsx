@@ -45,7 +45,10 @@ import {
   getSpeechOptions,
 } from '../../constants/modelCapabilities';
 import type { FieldDefinition } from '../../constants/providerFieldSchemas';
-import { getProviderFieldsForModule } from '../../constants/providerFieldSchemas';
+import {
+  getProviderFieldsForModule,
+  withCanonicalCompletionTokens,
+} from '../../constants/providerFieldSchemas';
 import {
   nextSoulbitsCapability,
   SOULBITS_MODULE_DEFAULT_MODEL,
@@ -149,7 +152,10 @@ function sanitizeLoadedCapability(
 ): { capability: Record<string, any>; changed: string[] } {
   if (!providerType) return { capability, changed: [] };
   const fields = getProviderFieldsForModule(providerType, modelModuleType);
-  const { values, changed } = sanitizeNumericValues(fields, capability);
+  // Legacy overlays stored the completion limit under an alias (`max_tokens`);
+  // the single "Max Completion Tokens" input prefers canonical-else-legacy.
+  const migrated = withCanonicalCompletionTokens(providerType, modelModuleType, capability);
+  const { values, changed } = sanitizeNumericValues(fields, migrated);
   return { capability: values as Record<string, any>, changed };
 }
 
