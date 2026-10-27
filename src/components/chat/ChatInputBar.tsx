@@ -73,8 +73,14 @@ interface ChatInputBarProps {
   onSendText: (text: string) => void;
   /** Called when a voice recording finishes and should be delivered. */
   onSendAudio: (audioData: string, mimeType: string, duration: number) => void;
-  /** Called when the user confirms the picked images. */
-  onSendImages: (images: PickedImage[]) => void;
+  /**
+   * Called when the user sends from the MAIN button with images selected.
+   * `caption` is the trimmed composer text (undefined when empty) — it rides
+   * along with the images instead of being dropped.
+   */
+  onSendImages: (images: PickedImage[], caption?: string) => void | Promise<void>;
+  /** Called when a selected preview thumbnail is tapped (opens the viewer). */
+  onPreviewImage?: (image: PickedImage) => void;
   /** When true, text sending is disabled (session offline) but photo/emoji/recording stay available. */
   disabled?: boolean;
   /** Own entity ID — used for the emoji picker action badges. */
@@ -97,6 +103,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   onSendText,
   onSendAudio,
   onSendImages,
+  onPreviewImage,
   disabled = false,
   entityId,
   showScenarioButton = true,
@@ -224,17 +231,50 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     [inputText.length],
   );
 
-  // ── Text send ─────────────────────────────────────────────────────────────
-  const handleSendText = useCallback(() => {
+  // ── Send — ONE button for text and for images (+ caption) ────────────────
+  const handleSend = useCallback(async () => {
+    if (isRecording || isSendingImages) return;
+
+    // Images selected: the main button is the single send. The composer text
+    // becomes the caption; BOTH are cleared only once the parent accepts the
+    // send — a rejected send keeps previews + text for a retry.
+    if (selectedImages.length > 0) {
+      hapticLightPress();
+      setIsSendingImages(true);
+      try {
+        await onSendImages(selectedImages, inputText.trim() || undefined);
+        setSelectedImages([]);
+        setInputText('');
+        if (showEmojiPicker) {
+          setShowEmojiPicker(false);
+        }
+      } catch (err) {
+        log.warn('Image send failed — keeping previews for retry:', err);
+      } finally {
+        setIsSendingImages(false);
+      }
+      return;
+    }
+
+    // Text-only sends behave exactly as before.
     const text = inputText.trim();
-    if (!text || disabled || isRecording) return;
+    if (!text || disabled) return;
     hapticLightPress();
     onSendText(text);
     setInputText('');
     if (showEmojiPicker) {
       setShowEmojiPicker(false);
     }
-  }, [inputText, disabled, isRecording, onSendText, showEmojiPicker]);
+  }, [
+    inputText,
+    disabled,
+    isRecording,
+    isSendingImages,
+    selectedImages,
+    onSendImages,
+    onSendText,
+    showEmojiPicker,
+  ]);
 
   // ── Emoji ────────────────────────────────────────────────────────────────
   const toggleEmojiPicker = useCallback(() => {
@@ -339,22 +379,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   const handleRemoveImage = useCallback((index: number) => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
   }, []);
-
-  const handleSendImages = useCallback(async () => {
-    if (selectedImages.length === 0 || isRecording || isSendingImages) return;
-    hapticLightPress();
-    setIsSendingImages(true);
-    try {
-      await onSendImages(selectedImages);
-      // Only clear the previews once the parent has accepted (persisted) them.
-      setSelectedImages([]);
-      if (showEmojiPicker) {
-        setShowEmojiPicker(false);
-      }
-    } finally {
-      setIsSendingImages(false);
-    }
-  }, [selectedImages, isRecording, isSendingImages, onSendImages, showEmojiPicker]);
 
   // ── Voice recording (tap to record, tap to stop & send) ──────────────────
   const finishRecording = useCallback(async () => {
@@ -461,7 +485,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   if (!theme) return null;
 
   const hasText = inputText.trim().length > 0;
-  const showSendButton = hasText && !isRecording;
+  const hasImages = selectedImages.length > 0;
+  // The main button is the ONLY send: it appears for text, images, or both.
+  const showSendButton = (hasText || hasImages) && !isRecording;
+  // Text-only sends keep their `disabled` gate inside handleSend (offline →
+  // no-op); images may still be attempted so the parent can toast.
+  const sendDisabled =
+    isRecording || isSendingImages || (!hasText && !hasImages);
   const accent = theme.colors.accent.primary;
   const accentSecondary =
     theme.colors.accent.secondary ?? theme.colors.accent.primaryHover ?? accent;
@@ -576,11 +606,18 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         pointerEvents="none"
       />
 
-      {/* ── Selected image previews ── */}
+      {/* ── Selected image previews — tap a thumbnail to preview, ✕ removes ── */}
       {selectedImages.length > 0 && (
         <View style={styles.imagePreviewRow}>
           {selectedImages.map((img, i) => (
-            <View key={`${img.base64.slice(0, 24)}-${i}`} style={styles.imagePreviewWrap}>
+            <TouchableOpacity
+              key={`${img.base64.slice(0, 24)}-${i}`}
+              style={styles.imagePreviewWrap}
+              onPress={() => onPreviewImage?.(img)}
+              activeOpacity={0.8}
+              accessibilityRole="imagebutton"
+              testID={`chat-input-image-preview-${i}`}
+            >
               <Image
                 source={{ uri: `data:${img.mimeType};base64,${img.base64}` }}
                 style={styles.imagePreview}
@@ -590,10 +627,11 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                 onPress={() => handleRemoveImage(i)}
                 style={styles.imageRemoveBtn}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                testID={`chat-input-image-remove-${i}`}
               >
                 <Icon name="close" size={12} color="#fff" />
               </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
           ))}
           <TouchableOpacity
             onPress={handlePickImages}
@@ -609,32 +647,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               <Icon name="plus" size={20} color={accent} />
             )}
           </TouchableOpacity>
-          <LinearGradient
-            colors={[accent, accentSecondary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[
-              styles.imageSendBtn,
-              isSendingImages && styles.imageSendBtnDisabled,
-            ]}
-          >
-            <TouchableOpacity
-              onPress={() => void handleSendImages()}
-              disabled={isSendingImages}
-              style={styles.imageSendBtnInner}
-            >
-              {isSendingImages ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Icon name="send" size={15} color="#fff" />
-                  <ThemedText size={12} weight="bold" style={styles.imageSendText}>
-                    {selectedImages.length}
-                  </ThemedText>
-                </>
-              )}
-            </TouchableOpacity>
-          </LinearGradient>
         </View>
       )}
 
@@ -766,14 +778,16 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             )}
           </View>
 
-          {/* Send / Mic */}
+          {/* Send / Mic — the ONE send button (images carry the caption) */}
           {showSendButton ? (
             <TouchableOpacity
-              onPress={handleSendText}
+              onPress={() => void handleSend()}
+              disabled={sendDisabled}
               style={styles.sendBtnWrap}
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityLabel="Send message"
+              accessibilityState={{ disabled: sendDisabled, busy: isSendingImages }}
               testID="chat-input-send-btn"
             >
               <LinearGradient
@@ -782,8 +796,28 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                 end={{ x: 1, y: 1 }}
                 style={styles.sendBtn}
               >
-                <Icon name="send" size={19} color="#fff" />
+                {isSendingImages ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Icon name="send" size={19} color="#fff" />
+                )}
               </LinearGradient>
+              {/* Image-count badge — same language as the old ➤N pill, now on
+                  the single main send button. Hidden for text-only sends. */}
+              {hasImages && !isSendingImages && (
+                <View
+                  style={styles.sendCountBadge}
+                  testID="chat-input-send-count-badge"
+                >
+                  <ThemedText
+                    size={10}
+                    weight="bold"
+                    style={[styles.sendCountText, { color: accent }]}
+                  >
+                    {selectedImages.length}
+                  </ThemedText>
+                </View>
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -929,6 +963,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sendCountBadge: {
+    position: 'absolute',
+    // Kept INSIDE the 42x42 button bounds: Android ViewGroups can clip children
+    // that overhang their parent, which would hide a negative-offset badge.
+    top: 0,
+    right: 0,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  sendCountText: {
+    lineHeight: 14,
+  },
   // ── Image previews ──
   imagePreviewRow: {
     flexDirection: 'row',
@@ -966,31 +1022,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(127,127,127,0.08)',
-  },
-  imageSendBtn: {
-    height: 40,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    marginLeft: 'auto',
-    alignSelf: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 5,
-    elevation: 4,
-  },
-  imageSendBtnDisabled: {
-    opacity: 0.7,
-  },
-  imageSendBtnInner: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-  imageSendText: {
-    color: '#fff',
   },
   // ── Recording panel ──
   recordingPanel: {

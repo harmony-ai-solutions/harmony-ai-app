@@ -28,7 +28,25 @@ const { width: screenWidth } = Dimensions.get('window');
  * so a voice note with its transcription collapsed is exactly as wide as a text
  * bubble that wrapped (owner report, 2026-10-22).
  */
-const AUDIO_ROW_MIN_WIDTH = Math.max(220, screenWidth * 0.75 - 24);
+const BUBBLE_INNER_MAX_WIDTH = Math.max(220, screenWidth * 0.75 - 24);
+const AUDIO_ROW_MIN_WIDTH = BUBBLE_INNER_MAX_WIDTH;
+
+/**
+ * Inline image tile width: the SAME inner-bubble width as the audio row.
+ * A percentage width (`width: '100%'`) collapses to a sliver inside a
+ * content-sized bubble — the bubble has no intrinsic width to resolve against
+ * (owner report, 2026-10-27: "image bubble renders as a narrow sliver"). The
+ * tile therefore claims an explicit pixel width; its height follows the
+ * photo's real aspect ratio (measured below).
+ */
+const IMAGE_TILE_WIDTH = BUBBLE_INNER_MAX_WIDTH;
+
+/** Height clamp for the inline image tile (px). */
+const IMAGE_TILE_MIN_HEIGHT = 120;
+const IMAGE_TILE_MAX_HEIGHT = 360;
+
+/** While `Image.getSize` is in flight (or if it fails): classic 4:3 photo. */
+const FALLBACK_IMAGE_ASPECT = 4 / 3;
 
 /**
  * Engine-parity blob presence (desktop frontend parity, `chatStoreUtils.js`):
@@ -235,6 +253,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [resolvedImage, setResolvedImage] = useState<string | null>(
     hasImageBytes(message) ? message.image_data ?? null : null,
   );
+  /**
+   * Real width/height ratio of the resolved image, measured from the data URI
+   * once the bytes land. `null` = still measuring (or getSize failed) → the
+   * 4:3 fallback keeps the tile a sane size instead of collapsing.
+   */
+  const [imageAspect, setImageAspect] = useState<number | null>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /**
    * Has playback actually started for the current utterance? RNTP reports
@@ -322,6 +346,35 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message.id, resolvedImage]);
+
+  // Measure the inline image so the tile follows the photo's REAL aspect
+  // ratio. A fixed height used to cover-crop portrait photos into squares;
+  // `Image.getSize` reads the data URI directly (no extra round-trip) and the
+  // 4:3 fallback holds the tile's size while measuring or if it fails.
+  useEffect(() => {
+    if (!resolvedImage) {
+      setImageAspect(null);
+      return;
+    }
+    let cancelled = false;
+    const uri = `data:${message.image_mime_type || 'image/jpeg'};base64,${resolvedImage}`;
+    setImageAspect(null);
+    Image.getSize(
+      uri,
+      (width, height) => {
+        if (!cancelled && width > 0 && height > 0) {
+          setImageAspect(width / height);
+        }
+      },
+      (error) => {
+        log.warn('Failed to measure message image:', error);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.id, message.image_mime_type, resolvedImage]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -560,6 +613,18 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const hasAudio = indicatesAudio(message);
     const hasImage = resolvedImage !== null && indicatesImage(message);
 
+    // Explicit tile geometry: pixel width (never a percentage — see
+    // IMAGE_TILE_WIDTH) + height from the measured aspect, clamped so a
+    // panorama stays readable and a portrait photo gets a proper tall tile.
+    const imageAspectRatio =
+      imageAspect && imageAspect > 0 ? imageAspect : FALLBACK_IMAGE_ASPECT;
+    const imageTileHeight = Math.round(
+      Math.min(
+        IMAGE_TILE_MAX_HEIGHT,
+        Math.max(IMAGE_TILE_MIN_HEIGHT, IMAGE_TILE_WIDTH / imageAspectRatio),
+      ),
+    );
+
     // Audio message with transcription (message_type: 'combined' or 'audio' with text)
     const hasAudioWithTranscription = hasAudio && hasText;
     // Still transcribing (message_type: 'audio' without text yet)
@@ -623,7 +688,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           >
             <Image
               source={{ uri: `data:${message.image_mime_type || 'image/jpeg'};base64,${resolvedImage}` }}
-              style={styles.image}
+              style={[styles.image, { width: IMAGE_TILE_WIDTH, height: imageTileHeight }]}
               resizeMode="cover"
             />
           </TouchableOpacity>
@@ -1000,8 +1065,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   image: {
-    width: '100%',
-    height: 200,
+    // Width/height are set inline from IMAGE_TILE_WIDTH + the measured aspect
+    // ratio — never a percentage (it collapsed inside a content-sized bubble).
     borderRadius: 12,
   },
   audioContainer: {

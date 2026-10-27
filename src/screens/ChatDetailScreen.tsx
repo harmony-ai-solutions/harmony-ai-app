@@ -74,6 +74,7 @@ import {
 import { getReplyMode } from '../database/repositories';
 import { getUserPersona } from '../database/repositories';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
+import { ImageViewerModal } from '../components/modals/ImageViewerModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import ChatBackgroundService from '../services/ChatBackgroundService';
@@ -451,6 +452,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     useState<ConversationMessage | null>(null);
   const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
   const [forwardMessageText, setForwardMessageText] = useState('');
+  // Full-screen zoomable viewer shared by image BUBBLES and composer
+  // thumbnails. `imageUri` is the data URL handed to ImageViewerModal; it is
+  // kept after close so the fade-out doesn't flash an empty frame.
+  const [imageViewer, setImageViewer] = useState<{
+    visible: boolean;
+    imageUri: string | null;
+  }>({ visible: false, imageUri: null });
   const [isDisabled, setIsDisabled] = useState(false);
   // True once the partner entity's disabled flag has been read from the DB.
   // The init effect gates on this so it never sends INIT while the flag is
@@ -1871,11 +1879,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   );
 
   const handleSendImages = useCallback(
-    async (images: PickedImage[]) => {
+    async (images: PickedImage[], caption?: string) => {
       if (isDisabled) {
         log.warn('Cannot send images: AI is disabled');
         showToast(t('disabledBanner'));
-        return;
+        // Rethrow so the input bar keeps the previews AND the caption for a
+        // retry — same contract as the session-not-active guard below.
+        throw new Error('AI is disabled');
       }
       if (!isSessionActive(currentInteractionIdRef.current)) {
         log.warn('Cannot send images: session not active');
@@ -1885,12 +1895,27 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       try {
-        for (const image of images) {
-          await EntitySessionService.sendImageMessage(
-            currentInteractionIdRef.current,
-            image.base64,
-            image.mimeType,
-          );
+        const trimmedCaption = caption?.trim();
+        for (let i = 0; i < images.length; i++) {
+          const image = images[i];
+          const isLast = i === images.length - 1;
+          // Caption rides on the LAST image only: the transcript then reads
+          // like a caption under the image stack, and the rapid-fire
+          // utterances merge into one engine turn.
+          if (isLast && trimmedCaption) {
+            await EntitySessionService.sendImageMessage(
+              currentInteractionIdRef.current,
+              image.base64,
+              image.mimeType,
+              trimmedCaption,
+            );
+          } else {
+            await EntitySessionService.sendImageMessage(
+              currentInteractionIdRef.current,
+              image.base64,
+              image.mimeType,
+            );
+          }
         }
 
         log.info(`Sent ${images.length} image message(s) for interaction ${routeInteractionId}`);
@@ -1918,6 +1943,35 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       t,
     ],
   );
+
+  // ---------------------------------------------------------------------------
+  // Full-screen image viewer (chat bubbles + composer thumbnails)
+  // ---------------------------------------------------------------------------
+
+  /** Open the shared viewer for a base64 payload (bubble bytes / picked image). */
+  const openImageViewer = useCallback((base64: string, mimeType: string) => {
+    setImageViewer({
+      visible: true,
+      imageUri: `data:${mimeType || 'image/jpeg'};base64,${base64}`,
+    });
+  }, []);
+
+  /** ChatBubble `onImagePress` — bytes are guaranteed present by the bubble. */
+  const handleBubbleImagePress = useCallback(
+    (imageBase64: string, mimeType: string) =>
+      openImageViewer(imageBase64, mimeType),
+    [openImageViewer],
+  );
+
+  /** Composer thumbnail tap — preview the image before sending. */
+  const handlePreviewPickedImage = useCallback(
+    (image: PickedImage) => openImageViewer(image.base64, image.mimeType),
+    [openImageViewer],
+  );
+
+  const closeImageViewer = useCallback(() => {
+    setImageViewer(prev => ({ ...prev, visible: false }));
+  }, []);
 
   const handleReplyToMessage = useCallback(
     (message: ConversationMessage) => {
@@ -2645,7 +2699,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           partnerAvatar={!isOwn ? partnerAvatar : null}
           partnerName={partnerName}
           repliedMessage={repliedMessage}
-          onImagePress={() => {}}
+          onImagePress={handleBubbleImagePress}
           onSendMessage={handleConfirmAndSendMessage}
           onEdit={handleEditMessage}
           onRetryTranscription={handleRetryTranscription}
@@ -2675,6 +2729,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
       handleRegenerateGreeting,
       handleLongPressMessage,
       handleReactToMessage,
+      handleBubbleImagePress,
     ],
   );
 
@@ -3112,6 +3167,13 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         onClose={() => setForwardPickerVisible(false)}
       />
 
+      {/* Full-screen zoomable viewer — chat image bubbles + composer previews */}
+      <ImageViewerModal
+        visible={imageViewer.visible}
+        imageUri={imageViewer.imageUri}
+        onClose={closeImageViewer}
+      />
+
       <View
         style={styles.keyboardAvoid}
       >
@@ -3380,6 +3442,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           onSendText={handleSendTextMessage}
           onSendAudio={handleSendAudioMessage}
           onSendImages={handleSendImages}
+          onPreviewImage={handlePreviewPickedImage}
           disabled={connectionState !== 'connected'}
           entityId={ownEntityId}
           showScenarioButton={!hasFirstMes}
