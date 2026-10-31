@@ -28,6 +28,16 @@
  * start therefore reads the sidecar, stats the file and either reports a
  * complete artifact, a resumable partial, or cleans the leftovers up.
  *
+ * Installed-version gate (cold start). The artifact + sidecar deliberately
+ * SURVIVE an install (retry posture: backing out of the system installer must
+ * leave the file tappable). That means the pending download usually describes
+ * the version that is NOW INSTALLED, and offering it again would re-prompt for
+ * an update that already happened. So {@link findPendingApkDownload} compares
+ * the sidecar version against the running app version and DISCARDS (file +
+ * sidecar) anything that is equal to or older than what is installed. The
+ * gate is skipped when the installed version reads back empty/unparseable —
+ * a bad read must never destroy a good download.
+ *
  * Resume is range-based: a `Range: bytes=0-0` probe discovers the total (and
  * detects a changed artifact), then ~2 MiB chunks are appended as base64. Every
  * chunk MUST come back `206`; a `200` means the server ignored the offset and
@@ -43,7 +53,9 @@
 import { NativeModules, Platform } from 'react-native';
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DeviceInfo from 'react-native-device-info';
 import { createLogger } from '../../utils/logger';
+import { compareSemver, normalizeVersion } from '../../utils/semver';
 import { uint8ArrayToBase64 } from '../../database/base64';
 
 const log = createLogger('[ApkSelfUpdate]');
@@ -204,6 +216,20 @@ let fsImpl: ApkDownloadFsLike = createDefaultFs();
 let fetchImpl: ApkFetch =
   typeof fetch !== 'undefined' ? fetch : (undefined as unknown as ApkFetch);
 
+/**
+ * The RUNNING app version — mirrors `UpdateAvailableService.appVersionProvider`.
+ * Used by the cold-start gate to drop a pending artifact that is not newer than
+ * what is already installed. A throw (bridge unavailable) reads back as '' and
+ * disables the gate.
+ */
+let installedVersionProvider: () => string = () => {
+  try {
+    return DeviceInfo.getVersion();
+  } catch {
+    return '';
+  }
+};
+
 function nativeModule(): Partial<ApkInstallNativeModule> | undefined {
   return (
     installModuleOverride ??
@@ -228,6 +254,11 @@ export function setApkDownloadFetchForTests(fetch: ApkFetch): void {
   fetchImpl = fetch;
 }
 
+/** Replace the installed-app-version provider (test seam). */
+export function setApkInstalledVersionProviderForTests(provider: () => string): void {
+  installedVersionProvider = provider;
+}
+
 /** Test-only: drop all state + restore the real seams. */
 export function resetApkDownloadStateForTests(): void {
   if (activeRun) activeRun.cancelled = true;
@@ -237,6 +268,13 @@ export function resetApkDownloadStateForTests(): void {
   fsImpl = createDefaultFs();
   installModuleOverride = null;
   fetchImpl = typeof fetch !== 'undefined' ? fetch : (undefined as unknown as ApkFetch);
+  installedVersionProvider = () => {
+    try {
+      return DeviceInfo.getVersion();
+    } catch {
+      return '';
+    }
+  };
 }
 
 // ── Observability ───────────────────────────────────────────────────────
@@ -818,8 +856,9 @@ export async function installDownloadedApk(): Promise<void> {
 
 /**
  * Read the sidecar and stat the artifact. Cleans up anything unusable (stale
- * sidecar, empty file, orphans of other versions, legacy timestamped files).
- * Returns null when there is no resumable/installable download.
+ * sidecar, empty file, a pending version that is not newer than the installed
+ * app, orphans of other versions, legacy timestamped files). Returns null when
+ * there is no resumable/installable download.
  */
 export async function findPendingApkDownload(): Promise<PendingApkDownload | null> {
   const sidecar = await readSidecar();
@@ -833,6 +872,24 @@ export async function findPendingApkDownload(): Promise<PendingApkDownload | nul
   if (size == null || size <= 0) {
     log.info(`Dropping the pending update sidecar (no usable artifact for ${sidecar.version})`);
     await clearSidecar();
+    await cleanOrphanApkFiles(null);
+    return null;
+  }
+
+  // Installed-version gate: the artifact + sidecar survive an install (retry
+  // posture), so a cold start after updating would otherwise offer "Install
+  // now" for the version ALREADY running. Only a STRICTLY newer pending version
+  // is worth offering. When the installed version is empty/unparseable
+  // (`cmp === null`) the gate stays OPEN — a bad version read must never
+  // destroy a good download. Applies to complete AND partial artifacts: neither
+  // is useful once the installed app caught up.
+  const installed = normalizeVersion(installedVersionProvider());
+  const cmp = compareSemver(sidecar.version, installed);
+  if (installed !== '' && cmp !== null && cmp !== 1) {
+    log.info(
+      `Discarding the pending update ${sidecar.version}: installed ${installed} is the same or newer`,
+    );
+    await discardArtifact(sidecar.destPath);
     await cleanOrphanApkFiles(null);
     return null;
   }

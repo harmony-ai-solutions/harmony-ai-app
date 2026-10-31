@@ -6,8 +6,9 @@
  * phase/progress state, a DETERMINISTIC destination + AsyncStorage sidecar, and
  * a range-based resume (probe → ~2 MiB chunks → append). This suite drives it
  * entirely through the test seams (`setApkDownloadFsForTests`,
- * `setApkInstallModuleForTests`, `setApkDownloadFetchForTests`), so no real
- * filesystem, timer or network is involved.
+ * `setApkInstallModuleForTests`, `setApkDownloadFetchForTests`,
+ * `setApkInstalledVersionProviderForTests`), so no real filesystem, timer,
+ * network or device bridge is involved.
  *
  * The global jest setup mocks Platform.OS='ios'; this suite re-mocks the RN
  * Platform module to 'android' because the whole feature is Android-only.
@@ -55,6 +56,7 @@ import {
   resetApkDownloadStateForTests,
   setApkDownloadFetchForTests,
   setApkDownloadFsForTests,
+  setApkInstalledVersionProviderForTests,
   setApkInstallModuleForTests,
 } from '../apkSelfUpdate';
 import type {
@@ -67,6 +69,10 @@ import type {
 
 const CACHE_DIR = '/cache';
 const VERSION = '1.4.0';
+/** The "an update is genuinely available" baseline (also jest.setup's DeviceInfo value). */
+const INSTALLED_BASE = '1.0.0';
+/** Still below VERSION — used to prove a strictly-newer pending artifact survives. */
+const INSTALLED_LOWER = '1.3.0';
 const URL = 'https://download.soulbits.app/app/v1.4.0/dev/soulbits-v1.4.0.apk';
 const DEST = `${CACHE_DIR}/soulbits-update-1.4.0.apk`;
 /** Mirrors the service's resume chunk size (2 MiB). */
@@ -267,6 +273,11 @@ beforeEach(() => {
 
   fetchMock = jest.fn(async () => rangeResponse(206, 'bytes 0-0/0'));
   setApkDownloadFetchForTests(fetchMock);
+
+  // Installed version seam: default mirrors the DeviceInfo mock (1.0.0), i.e.
+  // the pending VERSION 1.4.0 is genuinely newer. Cold-start gate tests
+  // override it explicitly.
+  setApkInstalledVersionProviderForTests(() => INSTALLED_BASE);
 
   emissions = [];
   onApkDownloadStateChange(next => emissions.push(next));
@@ -688,6 +699,86 @@ describe('findPendingApkDownload', () => {
     expect(pending).toBeNull();
     expect(fs.files.has(`${CACHE_DIR}/soulbits-update-1699999999999.apk`)).toBe(false);
     expect(fs.files.has(`${CACHE_DIR}/soulbits-update-1.3.0.apk`)).toBe(false);
+  });
+});
+
+// ── Cold-start installed-version gate ───────────────────────────────────
+
+describe('findPendingApkDownload — installed-version gate', () => {
+  it('discards a complete artifact for the version that is already installed', async () => {
+    fs.files.set(DEST, 1000);
+    fs.files.set(`${CACHE_DIR}/soulbits-update-1.2.0.apk`, 700);
+    seedSidecar(1000);
+    setApkInstalledVersionProviderForTests(() => VERSION);
+
+    const pending = await findPendingApkDownload();
+
+    expect(pending).toBeNull();
+    expect(fs.unlink).toHaveBeenCalledWith(DEST);
+    expect(fs.files.has(DEST)).toBe(false);
+    expect(sidecar()).toBeNull();
+    // The discard path sweeps every orphan artifact (no `keepPath`).
+    expect(fs.files.has(`${CACHE_DIR}/soulbits-update-1.2.0.apk`)).toBe(false);
+  });
+
+  it('discards a complete artifact OLDER than the installed version', async () => {
+    fs.files.set(DEST, 1000);
+    seedSidecar(1000);
+    setApkInstalledVersionProviderForTests(() => '1.5.0');
+
+    const pending = await findPendingApkDownload();
+
+    expect(pending).toBeNull();
+    expect(fs.files.has(DEST)).toBe(false);
+    expect(sidecar()).toBeNull();
+  });
+
+  it('keeps a complete artifact that is STRICTLY NEWER than the installed version', async () => {
+    fs.files.set(DEST, 1000);
+    seedSidecar(1000);
+    setApkInstalledVersionProviderForTests(() => INSTALLED_LOWER);
+
+    const pending = await findPendingApkDownload();
+
+    expect(pending).toEqual({
+      version: VERSION,
+      url: URL,
+      bytesFetched: 1000,
+      contentLength: 1000,
+      percent: 100,
+      complete: true,
+    });
+    expect(fs.unlink).not.toHaveBeenCalled();
+    expect(fs.files.get(DEST)).toBe(1000);
+    expect(sidecar()?.version).toBe(VERSION);
+  });
+
+  it('keeps the pending artifact when the installed version is unparseable', async () => {
+    fs.files.set(DEST, 1000);
+    seedSidecar(1000);
+    setApkInstalledVersionProviderForTests(() => 'dev');
+
+    const pending = await findPendingApkDownload();
+
+    // A bad version read must never destroy a good download.
+    expect(pending?.complete).toBe(true);
+    expect(pending?.version).toBe(VERSION);
+    expect(fs.unlink).not.toHaveBeenCalled();
+    expect(fs.files.get(DEST)).toBe(1000);
+    expect(sidecar()?.contentLength).toBe(1000);
+  });
+
+  it('discards a PARTIAL for the installed version too (gate runs before the complete/partial branch)', async () => {
+    fs.files.set(DEST, 400);
+    seedSidecar(1000);
+    setApkInstalledVersionProviderForTests(() => VERSION);
+
+    const pending = await findPendingApkDownload();
+
+    expect(pending).toBeNull();
+    expect(fs.unlink).toHaveBeenCalledWith(DEST);
+    expect(fs.files.has(DEST)).toBe(false);
+    expect(sidecar()).toBeNull();
   });
 });
 
