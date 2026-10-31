@@ -187,6 +187,153 @@ describe('interactions adapter', () => {
   });
 });
 
+describe('global inbox adapter (task 02-1)', () => {
+  const globalRow = (over: Record<string, unknown> = {}) => ({
+    ...chatListRow(),
+    entity_id: 'e2',
+    last_activity_at: '2026-10-11T10:00:00Z',
+    muted: false,
+    entity_disabled: false,
+    partner_entity_id: 'user',
+    partner_display_name: 'Aria',
+    partner_profile_id: 'p1',
+    ...over,
+  });
+
+  it('maps the global page (companion metadata, archived array, pagination) and sends pov/limit/offset/include_archived', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/chat-list',
+        json: {
+          conversations: [
+            globalRow({
+              unread_count: 2,
+              pinned: true,
+              last_message: {
+                id: 'm9',
+                entity_id: 'e2',
+                sender_entity_id: 'user',
+                interaction_id: 'i1',
+                content: 'see you tonight',
+                message_type: 'text',
+                emotional_state_bits: 0,
+                is_recon_followup: false,
+                is_edited: false,
+                is_pinned: false,
+                is_read: false,
+                created_at: '2026-10-11T10:00:00Z',
+                updated_at: '2026-10-11T10:00:00Z',
+                deleted_at: null,
+              },
+              last_message_at: '2026-10-11T10:00:00Z',
+            }),
+          ],
+          archived: [globalRow({ participant_key: 'e1+e3', archived: true })],
+          has_more: true,
+          next_offset: 20,
+        },
+      },
+    ]);
+    install(server);
+
+    const page = await interactionsRepo.getGlobalInboxPage('user', {
+      limit: 20,
+      offset: 0,
+      includeArchived: true,
+    });
+
+    const call = server.lastCall('GET', '/api/entities/chat-list')!;
+    expect(call.query).toEqual({
+      pov_entity_id: 'user',
+      limit: '20',
+      offset: '0',
+      include_archived: '1',
+    });
+
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows[0]).toMatchObject({
+      interactionId: 'i1',
+      participantKey: 'e1+e2',
+      interactionScope: 'private',
+      participantIds: '["e1","e2"]',
+      unreadCount: 2,
+      pinned: true,
+      archived: false,
+      replyMode: 'realistic',
+      entityId: 'e2',
+      partnerEntityId: 'user',
+      partnerDisplayName: 'Aria',
+      partnerProfileId: 'p1',
+      muted: false,
+      entityDisabled: false,
+      lastMessageAt: '2026-10-11T10:00:00Z',
+      lastActivityAt: '2026-10-11T10:00:00Z',
+    });
+    expect(page.rows[0].lastMessage?.content).toBe('see you tonight');
+
+    // Archived threads ride in their own array and are always archived:true.
+    expect(page.archived).toHaveLength(1);
+    expect(page.archived[0]).toMatchObject({ participantKey: 'e1+e3', archived: true });
+
+    expect(page.hasMore).toBe(true);
+    expect(page.nextOffset).toBe(20);
+  });
+
+  it('forwards offset for later pages and omits include_archived when not asked', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/chat-list',
+        respond: req => ({
+          json: {
+            conversations: [globalRow({ participant_key: `e1+${req.query.offset}` })],
+            has_more: false,
+            next_offset: null,
+          },
+        }),
+      },
+    ]);
+    install(server);
+
+    const page = await interactionsRepo.getGlobalInboxPage('user', { limit: 20, offset: 40 });
+
+    const call = server.lastCall('GET', '/api/entities/chat-list')!;
+    expect(call.query).toEqual({ pov_entity_id: 'user', limit: '20', offset: '40' });
+    expect(page.rows[0].participantKey).toBe('e1+40');
+    expect(page.archived).toEqual([]);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextOffset).toBeNull();
+  });
+
+  it('treats a 404 as UNSUPPORTED (an engine without the global route)', async () => {
+    // Only the per-entity route exists → the global call 404s.
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: /\/api\/entities\/[^/]+\/chat-list$/,
+        json: { conversations: [], has_more: false, next_offset: null },
+      },
+    ]);
+    install(server);
+
+    await expect(
+      interactionsRepo.getGlobalInboxPage('user', { limit: 20, offset: 0 }),
+    ).rejects.toBeInstanceOf(EngineApiUnsupportedError);
+  });
+
+  it('treats an unrecognised 200 shape as UNSUPPORTED (contract mismatch)', async () => {
+    const server = createMockManagementServer([
+      { method: 'GET', path: '/api/entities/chat-list', json: { rows: [] } },
+    ]);
+    install(server);
+
+    await expect(
+      interactionsRepo.getGlobalInboxPage('user', { limit: 20, offset: 0 }),
+    ).rejects.toBeInstanceOf(EngineApiUnsupportedError);
+  });
+});
+
 describe('conversation_messages adapter', () => {
   it('maps a message page', async () => {
     const server = createMockManagementServer([

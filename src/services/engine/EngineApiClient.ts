@@ -199,6 +199,37 @@ export interface ChatListResponseDto {
   next_offset: number | null;
 }
 
+/**
+ * One row of the GLOBAL inbox (`GET /api/entities/chat-list`, task 02-1).
+ *
+ * Additive on top of {@link ChatListRowDto}: the global route fills the
+ * companion metadata (`entity_id`, `muted`, `entity_disabled`,
+ * `partner_display_name`, `partner_profile_id`) so the inbox renders without a
+ * second request. The per-entity route emits them as zero values.
+ */
+export interface GlobalChatListRowDto extends ChatListRowDto {
+  /** The AI companion that owns the thread. */
+  entity_id: string;
+  last_activity_at?: string | null;
+  muted?: boolean;
+  entity_disabled?: boolean;
+  /** The other side of a 1:1 thread (the persona), not the companion. */
+  partner_entity_id?: string;
+  partner_display_name?: string;
+  partner_profile_id?: string;
+}
+
+export interface GlobalChatListResponseDto {
+  conversations: GlobalChatListRowDto[];
+  /**
+   * Present only with `include_archived=1`: archived threads in a SEPARATE
+   * bounded array (engine caps it), same row shape as `conversations`.
+   */
+  archived?: GlobalChatListRowDto[];
+  has_more: boolean;
+  next_offset: number | null;
+}
+
 export interface MessagesResponseDto {
   messages: ConversationMessageDto[];
   has_more: boolean;
@@ -1235,6 +1266,37 @@ export class EngineApiClient {
     return this.getJson<ChatListResponseDto>(
       `/api/entities/${encodeURIComponent(entityId)}/chat-list${q}`,
     );
+  }
+
+  /**
+   * GLOBAL inbox: every conversation across ALL companions in one call
+   * (`GET /api/entities/chat-list`, task 02-1). Rows are ordered pinned DESC,
+   * last_activity_at DESC by the engine — clients must not re-sort. Archived
+   * threads come back in a separate bounded `archived` array when
+   * `includeArchived` is set.
+   *
+   * `povEntityId` pivots the dedupe (and the unread count) on that entity —
+   * the screen passes the impersonated persona. Omit it for the historic
+   * companion-pivoted behaviour.
+   *
+   * A 404 means the connected engine predates the route; the repository maps
+   * that to {@link EngineApiUnsupportedError} so the caller can fall back.
+   */
+  globalChatList(
+    opts: {
+      povEntityId?: string;
+      limit?: number;
+      offset?: number;
+      includeArchived?: boolean;
+    } = {},
+  ): Promise<GlobalChatListResponseDto> {
+    const q = buildQuery({
+      pov_entity_id: opts.povEntityId,
+      limit: opts.limit,
+      offset: opts.offset,
+      include_archived: opts.includeArchived ? 1 : undefined,
+    });
+    return this.getJson<GlobalChatListResponseDto>(`/api/entities/chat-list${q}`);
   }
 
   /**

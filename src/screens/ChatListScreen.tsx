@@ -31,7 +31,9 @@ import {
 import { resolvePersonaId } from '../database/repositories';
 import {
   getPhoneConversationsPage,
+  getGlobalInboxPage,
   PhoneConversationPageRow,
+  GlobalInboxPage,
   getLastInteractionMessage,
   deriveScopeFromParticipants,
   deriveParticipantKey,
@@ -120,6 +122,195 @@ function sortListItems(items: ChatListItem[]): ChatListItem[] {
     return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
   });
   return items;
+}
+
+/**
+ * Order one page of list items for display.
+ *
+ * The GLOBAL inbox (`GET /api/entities/chat-list`) is already ordered by the
+ * engine (pinned DESC, last activity DESC) and its contract says clients must
+ * NOT re-sort — that server order is what keeps live updates stable. Only the
+ * legacy per-entity path is ordered client-side (F6).
+ */
+export function arrangeChatListItems(
+  items: ChatListItem[],
+  preserveServerOrder: boolean,
+): ChatListItem[] {
+  return preserveServerOrder ? items : sortListItems(items);
+}
+
+/** One row after Phase-A planning (dedupe + scope + blocked/deleted filter). */
+export interface PlannedInboxRow {
+  row: PhoneConversationPageRow;
+  participantIds: string[];
+  participantKey: string;
+  scope: string;
+  /** Private scope only — the non-impersonated participant (the companion). */
+  partnerEntityId?: string;
+}
+
+/**
+ * Phase A of the list build: synchronous, network-free planning. Dedupes by
+ * participant_key, derives the scope, applies the blocked-users filter (F5),
+ * skips group chats with a blocked participant and drops private rows whose
+ * partner entity no longer exists (deleted / never synced).
+ *
+ * Exported so the filtering rules stay testable without rendering the screen.
+ */
+export function planInboxRows(
+  rows: PhoneConversationPageRow[],
+  activeEntityId: string,
+  filteredIds: Set<string>,
+  knownEntityIds: ReadonlySet<string>,
+): PlannedInboxRow[] {
+  const seenPrivateKeys = new Set<string>(); // For deduping private interactions per D-01
+  const plans: PlannedInboxRow[] = [];
+
+  for (const row of rows) {
+    let participantIds: string[];
+    try {
+      participantIds = JSON.parse(row.participantIds);
+    } catch {
+      participantIds = [];
+    }
+
+    const scope = row.interactionScope;
+    const participantKey = row.participantKey || '';
+    if (!participantKey) continue;
+
+    if (scope === 'private') {
+      // Private interactions: group by participant_key per D-01
+      if (seenPrivateKeys.has(participantKey)) continue;
+      seenPrivateKeys.add(participantKey);
+
+      // Find the partner entity (the one that's NOT the impersonated entity)
+      const partnerEntityId = participantIds.find(id => id !== activeEntityId);
+      if (!partnerEntityId) continue;
+
+      // F5: blocked users do not appear in the chat list.
+      if (filteredIds.has(partnerEntityId)) continue;
+
+      // Defensive: skip interactions whose partner entity no longer exists.
+      // getAllEntities() only returns non-deleted entities, so a partner
+      // absent from the entity set means the entity was deleted (or never
+      // synced). Without this skip, a deleted partner renders as a bare
+      // entity ID row with no profile info. This only applies to private
+      // (pair) interactions — group chats handle missing members by name.
+      if (!knownEntityIds.has(partnerEntityId)) continue;
+
+      plans.push({ row, participantIds, participantKey, scope, partnerEntityId });
+    } else if (scope === 'group') {
+      // F5: skip group conversations containing a blocked participant.
+      if (participantIds.some(id => filteredIds.has(id))) continue;
+      plans.push({ row, participantIds, participantKey, scope });
+    }
+  }
+
+  return plans;
+}
+
+/** Result of one inbox page read (global endpoint, or the per-entity fallback). */
+export interface InboxPageRead {
+  rows: PhoneConversationPageRow[];
+  /** Global route only: archived rows from the separate bounded array. */
+  archivedRows: PhoneConversationPageRow[];
+  hasMore: boolean;
+  nextOffset: number | null;
+  source: 'global' | 'per-entity';
+  /** True when this read tried the global route and it is not supported. */
+  globalUnsupported: boolean;
+}
+
+/**
+ * True when the engine rejected the global route because it does not exist
+ * there: an explicit `EngineApiUnsupportedError` (contract-mismatch signal
+ * from the repository) or a bare 404 from an older embedded engine.
+ */
+function isUnsupportedInboxError(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'EngineApiUnsupportedError') return true;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    (error as { status: unknown }).status === 404
+  );
+}
+
+/**
+ * Read ONE inbox page for the persona `povEntityId`.
+ *
+ * Preferred path: the GLOBAL engine inbox (one call for every companion, rows
+ * already ordered + hydrated, archived split into its own array). When the
+ * connected embedded engine predates that route (404 / unsupported), this
+ * transparently falls back to the SAME per-entity fan-out the screen used
+ * before — the fallback is a page-for-page swap, so pagination, filtering and
+ * hydration keep working unchanged.
+ *
+ * `preferGlobal: false` skips the attempt once the caller has learned the
+ * engine does not support it (avoids a guaranteed 404 on every page).
+ * Exported for the screen's inbox tests (a full render is not viable in the
+ * node test env — see ChatListScreen.test.tsx).
+ */
+export async function readInboxPage(params: {
+  povEntityId: string;
+  limit: number;
+  offset: number;
+  includeArchived?: boolean;
+  preferGlobal?: boolean;
+}): Promise<InboxPageRead> {
+  const { povEntityId, limit, offset, includeArchived = false, preferGlobal = true } = params;
+
+  if (preferGlobal) {
+    try {
+      const page: GlobalInboxPage = await getGlobalInboxPage(povEntityId, {
+        limit,
+        offset,
+        includeArchived,
+      });
+      return {
+        rows: page.rows,
+        archivedRows: page.archived,
+        hasMore: page.hasMore,
+        nextOffset: page.nextOffset,
+        source: 'global',
+        globalUnsupported: false,
+      };
+    } catch (error) {
+      if (!isUnsupportedInboxError(error)) throw error;
+      log.warn(
+        'Global inbox unsupported by the connected engine — falling back to the per-entity chat list:',
+        error,
+      );
+    }
+  }
+
+  const rows = await getPhoneConversationsPage(povEntityId, { limit, offset });
+  // The per-entity route signals "more" only by returning a full page (its
+  // archived rows arrive inline with the regular rows, not in a second array).
+  const hasMore = rows.length === limit;
+  return {
+    rows,
+    archivedRows: [],
+    hasMore,
+    nextOffset: hasMore ? offset + limit : null,
+    source: 'per-entity',
+    globalUnsupported: preferGlobal,
+  };
+}
+
+/**
+ * Merge the global inbox's separate archived array into the row list. The
+ * screen splits rows back into main / archived by the `archived` flag, exactly
+ * like the per-entity path does; active rows win on a duplicate key.
+ */
+export function mergeArchivedInboxRows(
+  rows: PhoneConversationPageRow[],
+  archivedRows: PhoneConversationPageRow[],
+): PhoneConversationPageRow[] {
+  if (archivedRows.length === 0) return rows;
+  const seen = new Set(rows.map(row => row.participantKey));
+  const extra = archivedRows.filter(row => !seen.has(row.participantKey));
+  return extra.length > 0 ? [...rows, ...extra] : rows;
 }
 
 /**
@@ -300,12 +491,19 @@ export const ChatListScreen: React.FC = () => {
   // event subscription reads it synchronously without re-subscribing.
   const chatListRef = useRef<ChatListItem[]>([]);
 
-  // Offset pagination (F6): pages already loaded, whether another page may
-  // exist, and an in-flight guard so onEndReached cannot stack fetches.
-  const listPageRef = useRef(0);
+  // Offset pagination (F6): the next page's offset (from the engine's
+  // `next_offset`, or offset+limit on the per-entity fallback), whether another
+  // page may exist, and an in-flight guard so onEndReached cannot stack
+  // fetches.
+  const listNextOffsetRef = useRef<number | null>(null);
   const listHasMoreRef = useRef(true);
   const loadingMoreRef = useRef(false);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Which inbox route the connected engine serves. 'unknown' tries the global
+  // endpoint first; once it answers 404/unsupported this sticks to
+  // 'per-entity' for the rest of the session so no page pays a guaranteed 404.
+  const inboxSourceRef = useRef<'unknown' | 'global' | 'per-entity'>('unknown');
 
   /**
    * Build chat-list rows from one page of conversation rows (deduped by
@@ -325,59 +523,10 @@ export const ChatListScreen: React.FC = () => {
       const entities = await getAllEntities();
       const entityMap = new Map(entities.map(e => [e.id, e]));
 
-      const seenPrivateKeys = new Set<string>(); // For deduping private interactions per D-01
-
-      interface PlannedRow {
-        row: PhoneConversationPageRow;
-        participantIds: string[];
-        participantKey: string;
-        scope: string;
-        /** Private scope only — the non-impersonated participant. */
-        partnerEntityId?: string;
-      }
-
       // Phase A — synchronous planning: dedupe, scope and blocked/deleted
       // filtering. No network calls here, so the row set is known immediately.
-      const plans: PlannedRow[] = [];
-      for (const row of rows) {
-        let participantIds: string[];
-        try {
-          participantIds = JSON.parse(row.participantIds);
-        } catch {
-          participantIds = [];
-        }
-
-        const scope = row.interactionScope;
-        const participantKey = row.participantKey || '';
-        if (!participantKey) continue;
-
-        if (scope === 'private') {
-          // Private interactions: group by participant_key per D-01
-          if (seenPrivateKeys.has(participantKey)) continue;
-          seenPrivateKeys.add(participantKey);
-
-          // Find the partner entity (the one that's NOT the impersonated entity)
-          const partnerEntityId = participantIds.find(id => id !== activeEntityId);
-          if (!partnerEntityId) continue;
-
-          // F5: blocked users do not appear in the chat list.
-          if (filteredIds.has(partnerEntityId)) continue;
-
-          // Defensive: skip interactions whose partner entity no longer exists.
-          // getAllEntities() only returns non-deleted entities, so a partner
-          // absent from entityMap means the entity was deleted (or never
-          // synced). Without this skip, a deleted partner renders as a bare
-          // entity ID row with no profile info. This only applies to private
-          // (pair) interactions — group chats handle missing members by name.
-          if (!entityMap.has(partnerEntityId)) continue;
-
-          plans.push({ row, participantIds, participantKey, scope, partnerEntityId });
-        } else if (scope === 'group') {
-          // F5: skip group conversations containing a blocked participant.
-          if (participantIds.some(id => filteredIds.has(id))) continue;
-          plans.push({ row, participantIds, participantKey, scope });
-        }
-      }
+      // (Shared with the tests — see `planInboxRows`.)
+      const plans = planInboxRows(rows, activeEntityId, filteredIds, new Set(entityMap.keys()));
 
       // Phase B — hydrate previews + profile names IN PARALLEL. Rows from
       // `getPhoneConversationsPage` are already hydrated by the engine's
@@ -586,7 +735,8 @@ export const ChatListScreen: React.FC = () => {
   /**
    * Second paint pass: fill avatars for the rows already on screen. Updates the
    * live list by participant key (so a concurrent live message update is not
-   * clobbered) and re-sorts only if nothing structural changed.
+   * clobbered). Row ORDER is never touched here: the global inbox's order is
+   * authoritative (and the legacy path was already sorted before the paint).
    */
   const applyResolvedAvatars = useCallback(async (base: ChatListItem[]) => {
     if (!base.some(item => item.avatarProfileId)) return;
@@ -609,14 +759,12 @@ export const ChatListScreen: React.FC = () => {
       const hydrated = await hydrateListAvatars(base, undefined, paintResolved);
       const avatarByKey = new Map(hydrated.map(item => [item.participantKey, item.avatarUri]));
       let changed = false;
-      const merged = sortListItems(
-        chatListRef.current.map(item => {
-          const avatarUri = avatarByKey.get(item.participantKey);
-          if (!avatarUri || item.avatarUri) return item;
-          changed = true;
-          return { ...item, avatarUri };
-        }),
-      );
+      const merged = chatListRef.current.map(item => {
+        const avatarUri = avatarByKey.get(item.participantKey);
+        if (!avatarUri || item.avatarUri) return item;
+        changed = true;
+        return { ...item, avatarUri };
+      });
       if (!changed) return;
       chatListRef.current = merged;
       setChatList(merged.filter(item => !item.archived));
@@ -627,52 +775,77 @@ export const ChatListScreen: React.FC = () => {
   }, []);
 
   /**
-   * Full chat-list (re)load — page 0 of the paginated conversation query
-   * (F6). Resets pagination state. The focus effect awaits persona resolution
-   * (F7) before calling this so the first load never flashes the default
-   * 'user' perspective.
+   * Full chat-list (re)load — page 0 of the paginated inbox. Resets pagination
+   * state. The focus effect awaits persona resolution (F7) before calling this
+   * so the first load never flashes the default 'user' perspective.
+   *
+   * Preferred route is the engine's GLOBAL inbox (one call for every companion,
+   * pivoted on the persona, rows already ordered + hydrated, archived split out
+   * into its own bounded array). Engines without that route automatically use
+   * the legacy per-entity fan-out via {@link readInboxPage}.
    */
   const loadChatList = useCallback(
     async (activeEntityId: string) => {
       try {
-        listPageRef.current = 0;
+        listNextOffsetRef.current = 0;
         listHasMoreRef.current = true;
 
-        // Filters, store-lock flags and the conversation page are independent
-        // reads — start all three together instead of chaining awaits.
-        const [filteredIds, lockedIds, rows] = await Promise.all([
+        // Filters, store-lock flags and the inbox page are independent reads —
+        // start all three together instead of chaining awaits.
+        const [filteredIds, lockedIds, page] = await Promise.all([
           loadFilteredEntityIds(),
           // Store-variant runtime lock (7-14 V3): locked entities stay VISIBLE,
           // so they are NOT added to the filtered (hidden) set — the flag rides
           // the row for greying / badge suppression / detail gating.
           getLockedEntityIds(),
-          getPhoneConversationsPage(activeEntityId, {
+          // Archived rides along on the first page ONLY (the engine returns a
+          // separate bounded array) — later pages omit it.
+          readInboxPage({
+            povEntityId: activeEntityId,
             limit: CHAT_LIST_PAGE_SIZE,
             offset: 0,
+            includeArchived: true,
+            preferGlobal: inboxSourceRef.current !== 'per-entity',
           }),
         ]);
 
+        // Remember which route the engine actually served.
+        if (page.source === 'global') {
+          inboxSourceRef.current = 'global';
+        } else if (page.globalUnsupported) {
+          inboxSourceRef.current = 'per-entity';
+        }
+
+        // Global rows carry archived threads in their own array; merge them so
+        // the SAME archived section below (split by the `archived` flag) works
+        // for both paths.
+        const rows =
+          page.source === 'global'
+            ? mergeArchivedInboxRows(page.rows, page.archivedRows)
+            : page.rows;
+
         const items = await buildListItems(activeEntityId, rows, filteredIds, lockedIds);
-        const sorted = sortListItems(items);
-        chatListRef.current = sorted;
+        // Global order is authoritative (contract) — no client re-sort there.
+        const arranged = arrangeChatListItems(items, page.source === 'global');
+        chatListRef.current = arranged;
 
         // Disabled conversations are FILTERED OUT (the disabled entity is off,
         // A4 union) — an enabled-but-archived conversation moves to the
         // separate archived section below the main list.
-        setChatList(sorted.filter(item => !item.archived));
-        setArchivedList(sorted.filter(item => item.archived));
+        setChatList(arranged.filter(item => !item.archived));
+        setArchivedList(arranged.filter(item => item.archived));
 
-        // Track how many pages are loaded for load-more (1 page now loaded).
-        listPageRef.current = rows.length === CHAT_LIST_PAGE_SIZE ? 1 : 0;
-        listHasMoreRef.current = rows.length === CHAT_LIST_PAGE_SIZE;
+        // Track the next page offset for load-more (page 0 is loaded now).
+        listNextOffsetRef.current = page.nextOffset ?? CHAT_LIST_PAGE_SIZE;
+        listHasMoreRef.current = page.hasMore;
 
         // Keep the floating bubble's unread badge in sync with the
         // conversation that currently has the bubble shown (if any).
-        syncBubbleUnreadBadge(sorted);
+        syncBubbleUnreadBadge(arranged);
 
         // Avatars arrive AFTER the first paint — rows (name, preview, time)
         // render immediately; the thumbnail pass fills them in.
-        void applyResolvedAvatars(sorted);
+        void applyResolvedAvatars(arranged);
       } catch (error) {
         log.error('Failed to load chat list:', error);
       } finally {
@@ -691,32 +864,49 @@ export const ChatListScreen: React.FC = () => {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      // Same three independent reads as loadChatList — issue them together.
-      const [filteredIds, lockedIds, rows] = await Promise.all([
+      // Same independent reads as loadChatList — issue them together.
+      const [filteredIds, lockedIds, page] = await Promise.all([
         loadFilteredEntityIds(),
         getLockedEntityIds(),
-        getPhoneConversationsPage(activeEntityId, {
+        readInboxPage({
+          povEntityId: activeEntityId,
           limit: CHAT_LIST_PAGE_SIZE,
-          offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
+          offset: listNextOffsetRef.current ?? 0,
+          // Archived threads are already on screen from the first page; the
+          // global route would re-send the same bounded array otherwise.
+          includeArchived: false,
+          preferGlobal: inboxSourceRef.current !== 'per-entity',
         }),
       ]);
 
-      if (rows.length === 0) {
+      if (page.source === 'per-entity' && page.globalUnsupported) {
+        inboxSourceRef.current = 'per-entity';
+      }
+
+      if (page.rows.length === 0) {
         listHasMoreRef.current = false;
         return;
       }
 
-      const items = await buildListItems(activeEntityId, rows, filteredIds, lockedIds);
-      listPageRef.current += 1;
-      listHasMoreRef.current = rows.length === CHAT_LIST_PAGE_SIZE;
+      const items = await buildListItems(activeEntityId, page.rows, filteredIds, lockedIds);
+      listNextOffsetRef.current = page.nextOffset;
+      listHasMoreRef.current = page.hasMore;
 
       // Defensive dedupe — the page query groups by participant_key so keys
       // never repeat across pages, but guard against re-added rows anyway.
       const existingKeys = new Set(chatListRef.current.map(item => item.participantKey));
       const fresh = items.filter(item => !existingKeys.has(item.participantKey));
-      if (fresh.length === 0) return;
+      if (fresh.length === 0) {
+        // Everything on this page was already known — still honour has_more.
+        listHasMoreRef.current = page.hasMore;
+        return;
+      }
 
-      const merged = sortListItems([...chatListRef.current, ...fresh]);
+      // Global pages append in server order (no re-sort); the legacy path sorts.
+      const merged = arrangeChatListItems(
+        [...chatListRef.current, ...fresh],
+        page.source === 'global',
+      );
       chatListRef.current = merged;
       setChatList(merged.filter(item => !item.archived));
       setArchivedList(merged.filter(item => item.archived));
