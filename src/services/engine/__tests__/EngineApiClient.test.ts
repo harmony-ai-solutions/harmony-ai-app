@@ -61,38 +61,6 @@ describe('EngineApiClient', () => {
     expect(call.headers['X-Loopback-Token']).toBeUndefined();
   });
 
-  it('maps chat-list params + parses the response', async () => {
-    const server = createMockManagementServer([
-      {
-        method: 'GET',
-        path: /\/api\/entities\/e1\/chat-list/,
-        json: {
-          conversations: [
-            {
-              interaction_id: 'i1',
-              participant_key: 'e1+e2',
-              interaction_scope: 'private',
-              participant_ids: '["e1","e2"]',
-              last_message: null,
-              last_message_at: null,
-              unread_count: 2,
-              pinned: true,
-              archived: false,
-              reply_mode: 'realistic',
-            },
-          ],
-          has_more: false,
-          next_offset: null,
-        },
-      },
-    ]);
-    const res = await clientWith(server).entityChatList('e1', { limit: 50, offset: 0 });
-    expect(res.conversations[0].unread_count).toBe(2);
-    const call = server.lastCall('GET', /chat-list/)!;
-    expect(call.query.limit).toBe('50');
-    expect(call.query.offset).toBe('0');
-  });
-
   it('sends the participant key as a path segment (encoded +) and passes the opaque before cursor verbatim', async () => {
     const server = createMockManagementServer([
       {

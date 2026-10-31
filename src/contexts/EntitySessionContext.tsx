@@ -37,8 +37,8 @@ const DEFAULT_RETRY_POLICY = {
  * `newMap.set(id, session)` stored identical CONTENT under a brand-new Map
  * REFERENCE. The provider's `value` useMemo (deps: activeSessions) then
  * recomputed and handed consumers freshly-built closures, which are deps of
- * ChatDetailScreen's `initializeSession` → the init effect re-fired → GET
- * /api/entities/:id/chat-list + a reused INIT … every ~330 ms, forever, for
+ * ChatDetailScreen's `initializeSession` → the init effect re-fired → a
+ * chat-list read + a reused INIT … every ~330 ms, forever, for
  * every mounted chat screen. Returning the PREVIOUS map in this case keeps the
  * provider value referentially stable and cuts the loop at its source (the
  * screen guard in ChatDetailScreen is the second belt).
@@ -248,7 +248,7 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
    * it as-is made the context value's `startInteractionSession` change identity
    * whenever `activeSessions` changed. ChatDetailScreen lists it as a dep of its
    * `initializeSession`, so every session-map update re-fired that screen's init
-   * effect → `getReplyMode()` (GET /api/entities/:id/chat-list, ~330 ms) +
+   * effect → `getReplyMode()` (a chat-list read, ~330 ms) +
    * a REUSED `startInteractionSession` (log: "Reusing existing interaction
    * session") → a fresh Map with identical content → next render → loop.
    */

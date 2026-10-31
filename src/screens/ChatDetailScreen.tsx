@@ -1033,7 +1033,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Guarded EXACTLY like the re-arm path above (owner device, 2026-10-21). This
   // effect used to call initializeSession() unconditionally, so every re-run —
   // and it re-ran on every render while the provider's callbacks were unstable —
-  // paid a GET /api/entities/:id/chat-list (~330 ms) followed by a reused INIT,
+  // paid a chat-list read (~330 ms) followed by a reused INIT,
   // then stored the identical session under a fresh Map, which restarted the
   // cycle. A live session for this participant set (CONNECTING included) or an
   // INIT already in flight means there is nothing to do. Mount is unaffected:

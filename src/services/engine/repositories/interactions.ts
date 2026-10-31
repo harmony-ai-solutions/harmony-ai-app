@@ -27,7 +27,7 @@ export interface PhoneConversationPageRow {
   participantIds: string;
   /**
    * Pre-hydrated fields straight off the engine's chat-list row
-   * (`GET /api/entities/:id/chat-list`). The screen uses them as-is instead of
+   * (`GET /api/entities/chat-list`). The screen uses them as-is instead of
    * re-fetching the last message / profile / settings per conversation; they
    * stay OPTIONAL so callers that build rows by hand (tests) still work.
    */
@@ -39,8 +39,8 @@ export interface PhoneConversationPageRow {
   replyMode?: 'realistic' | 'instant';
   /**
    * GLOBAL inbox extras (`GET /api/entities/chat-list`, task 02-1). The
-   * per-entity route leaves them undefined; the global route fills them so the
-   * inbox can name/badge a row without another request.
+   * route fills them so the inbox can name/badge a row without another
+   * request.
    *
    * `entityId` is the AI companion that owns the thread (NOT the persona the
    * list is pivoted on), `partnerEntityId` is the other side of a 1:1 thread.
@@ -145,8 +145,7 @@ export async function getInteractionByParticipantKey(
 }
 
 /**
- * Map one engine chat-list row onto the shape the screen consumes. Shared by
- * the per-entity and global routes so the two paths cannot drift.
+ * Map one engine chat-list row onto the shape the screen consumes.
  */
 function mapChatListRow(row: ChatListRowDto): PhoneConversationPageRow {
   return {
@@ -177,20 +176,6 @@ function mapGlobalChatListRow(row: GlobalChatListRowDto): PhoneConversationPageR
   };
 }
 
-export async function getPhoneConversationsPage(
-  entity_id: string,
-  options: { limit: number; offset: number },
-): Promise<PhoneConversationPageRow[]> {
-  const res = await engineApiClient.entityChatList(entity_id, {
-    limit: options.limit,
-    offset: options.offset,
-  });
-  // The engine's chat-list row is already fully hydrated (last message, unread
-  // count, pin/archive, reply mode) — carry every field through so the chat
-  // list never re-fetches them one conversation at a time.
-  return (res.conversations ?? []).map(mapChatListRow);
-}
-
 /**
  * One page of the GLOBAL inbox (`GET /api/entities/chat-list`, task 02-1):
  * every conversation across every companion in a single call, ordered by the
@@ -202,13 +187,15 @@ export async function getPhoneConversationsPage(
  * only). Both arrays carry the same fully-hydrated row shape, so the screen's
  * Phase-B hydration fallbacks stay no-ops.
  *
- * Contract mismatch (an older embedded engine without the route, i.e. 404, or
- * a response without a `conversations` array) throws
- * {@link EngineApiUnsupportedError} — the caller's cue to fall back to the
- * per-entity path. Any other error propagates unchanged.
+ * Contract mismatch (a response without a `conversations` array, or a 404)
+ * throws {@link EngineApiUnsupportedError} so the caller can surface a real
+ * contract failure. Any other error propagates unchanged.
+ *
+ * `povEntityId` is the persona the inbox is pivoted on. Omit it for the
+ * unpivoted companion view (every thread, `entityId` = owning companion).
  */
 export async function getGlobalInboxPage(
-  povEntityId: string,
+  povEntityId: string | undefined,
   options: { limit: number; offset: number; includeArchived?: boolean },
 ): Promise<GlobalInboxPage> {
   let res: GlobalChatListResponseDto;

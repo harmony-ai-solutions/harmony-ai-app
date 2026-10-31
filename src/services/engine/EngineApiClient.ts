@@ -7,8 +7,8 @@
  * `X-Admin-API-Key` for non-loopback binds — desktop parity).
  *
  * Scope (3-1b consolidated surface — the former `/api/mobile/*` group dissolved):
- *   - entity conversation reads: `/api/entities/:id/{chat-list,interactions,
- *     emotion,memories,emoji-actions}` and
+ *   - entity conversation reads: `/api/entities/chat-list` (global inbox) and
+ *     `/api/entities/:id/{interactions,emotion,memories,emoji-actions}` and
  *     `/api/entities/:id/conversations/:participantKey/messages`
  *   - message writes + byte endpoints: `/api/messages/:id` (PATCH/DELETE) and
  *     `/api/messages/:id/{audio,image}`
@@ -179,7 +179,7 @@ export interface MemoryDto {
   deleted_at: string | null;
 }
 
-/** One chat-list row (`GET /api/entities/:id/chat-list`). */
+/** One chat-list row (`GET /api/entities/chat-list`, the global inbox). */
 export interface ChatListRowDto {
   interaction_id: string;
   participant_key: string;
@@ -193,19 +193,13 @@ export interface ChatListRowDto {
   reply_mode: string;
 }
 
-export interface ChatListResponseDto {
-  conversations: ChatListRowDto[];
-  has_more: boolean;
-  next_offset: number | null;
-}
-
 /**
  * One row of the GLOBAL inbox (`GET /api/entities/chat-list`, task 02-1).
  *
  * Additive on top of {@link ChatListRowDto}: the global route fills the
  * companion metadata (`entity_id`, `muted`, `entity_disabled`,
  * `partner_display_name`, `partner_profile_id`) so the inbox renders without a
- * second request. The per-entity route emits them as zero values.
+ * second request.
  */
 export interface GlobalChatListRowDto extends ChatListRowDto {
   /** The AI companion that owns the thread. */
@@ -1257,30 +1251,20 @@ export class EngineApiClient {
 
   // ── Entity conversation reads (3-1b consolidated) ──────────────────────
 
-  /** One row per phone conversation for the POV entity (newest first). */
-  entityChatList(
-    entityId: string,
-    opts: { limit?: number; offset?: number } = {},
-  ): Promise<ChatListResponseDto> {
-    const q = buildQuery({ limit: opts.limit, offset: opts.offset });
-    return this.getJson<ChatListResponseDto>(
-      `/api/entities/${encodeURIComponent(entityId)}/chat-list${q}`,
-    );
-  }
-
   /**
    * GLOBAL inbox: every conversation across ALL companions in one call
    * (`GET /api/entities/chat-list`, task 02-1). Rows are ordered pinned DESC,
-   * last_activity_at DESC by the engine — clients must not re-sort. Archived
-   * threads come back in a separate bounded `archived` array when
-   * `includeArchived` is set.
+   * last-message time DESC (message-less last) by the engine — clients must not
+   * re-sort. Archived threads come back in a separate bounded `archived` array
+   * when `includeArchived` is set.
    *
    * `povEntityId` pivots the dedupe (and the unread count) on that entity —
    * the screen passes the impersonated persona. Omit it for the historic
    * companion-pivoted behaviour.
    *
-   * A 404 means the connected engine predates the route; the repository maps
-   * that to {@link EngineApiUnsupportedError} so the caller can fall back.
+   * This is the ONLY inbox route: the per-entity chat-list route is gone, so a
+   * 404 is a real contract failure (mapped to
+   * {@link EngineApiUnsupportedError} by the repository).
    */
   globalChatList(
     opts: {

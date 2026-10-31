@@ -27,7 +27,7 @@ import {
 } from '../../database/repositories';
 import { resolvePersonaId } from '../../database/repositories';
 import {
-  getPhoneConversationsPage,
+  getGlobalInboxPage,
   PhoneConversationPageRow,
   getLastInteractionMessage,
 } from '../../database/repositories';
@@ -47,7 +47,6 @@ import {
   deleteConversationByParticipantKey,
   markConversationMessagesRead,
   markConversationMessagesUnread,
-  getUnreadCountByParticipantKeys,
 } from '../../database/repositories';
 import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
 import { ChatConversationMenuModal } from '../../components/chat/ChatConversationMenuModal';
@@ -146,9 +145,15 @@ export const ArchivedChatsScreen: React.FC = () => {
       // Store-variant lock (7-14 V3): no-op / empty in the full variant.
       const lockedIds = await getLockedEntityIds();
 
-      // F6: same conversation-level query the chat list uses — deduped by
-      // participant_key and ordered by last-message created_at.
-      const rows = await getPhoneConversationsPage(impersonated, { limit: 200, offset: 0 });
+      // Same global inbox the chat list reads: its archived threads arrive in
+      // a separate bounded array, already deduped by participant_key and
+      // ordered by last-message time.
+      const page = await getGlobalInboxPage(impersonated, {
+        limit: 200,
+        offset: 0,
+        includeArchived: true,
+      });
+      const rows = page.archived;
       const candidates: ArchivedItem[] = [];
       const seenKeys = new Set<string>();
 
@@ -171,7 +176,12 @@ export const ArchivedChatsScreen: React.FC = () => {
         if (!entityMap.has(partnerEntityId)) continue;
 
         const entity = entityMap.get(partnerEntityId);
-        const lastMsg = await getLastInteractionMessage(impersonated, participantKey);
+        // The global archived row already carries its last message — only
+        // hand-built rows pay the `/messages` read.
+        const lastMsg =
+          row.lastMessage !== undefined
+            ? row.lastMessage
+            : await getLastInteractionMessage(impersonated, participantKey);
         let avatarUri: string | null = null;
         let characterProfileName: string | null = null;
         if (entity?.character_profile_id) {
@@ -197,26 +207,23 @@ export const ArchivedChatsScreen: React.FC = () => {
           muted: entity?.is_muted === 1,
           disabled: entity?.is_disabled === 1,
           locked: lockedIds.has(partnerEntityId),
-          unreadCount: 0,
+          // Pre-hydrated by the global inbox (unread_count per conversation).
+          unreadCount: row.unreadCount ?? 0,
         });
       }
 
-      // Filter to archived only. pin/archive come from the settings batch;
-      // mute/disabled are entity flags (already set above); unread is derived
-      // from conversation_messages.is_read (A2-scoped).
+      // Filter to archived only. pin comes from the settings batch (the same
+      // global read); mute/disabled are entity flags (already set above).
+      // Unread was pre-hydrated on the row — mute/lock only suppress it.
       const keys = candidates.map(c => c.participantKey);
       const settingsMap = await getChatConversationSettingsBatch(keys);
-      const unreadMap = await getUnreadCountByParticipantKeys(keys, impersonated);
       const archived = candidates.filter(c => settingsMap.get(c.participantKey)?.archived);
       for (const item of archived) {
         const s = settingsMap.get(item.participantKey);
         if (s) {
           item.pinned = s.pinned;
         }
-        item.unreadCount =
-          item.muted || item.locked
-            ? 0
-            : (unreadMap.get(item.participantKey) ?? 0);
+        if (item.muted || item.locked) item.unreadCount = 0;
       }
       archived.sort((a, b) => {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;

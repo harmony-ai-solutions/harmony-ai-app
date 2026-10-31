@@ -59,83 +59,6 @@ afterAll(() => {
 });
 
 describe('interactions adapter', () => {
-  it('maps the chat-list page to PhoneConversationPageRow[]', async () => {
-    const server = createMockManagementServer([
-      {
-        method: 'GET',
-        path: /chat-list/,
-        json: { conversations: [chatListRow()], has_more: false, next_offset: null },
-      },
-    ]);
-    install(server);
-    const rows = await interactionsRepo.getPhoneConversationsPage('e1', { limit: 50, offset: 0 });
-    expect(rows).toEqual([
-      {
-        interactionId: 'i1',
-        interactionScope: 'private',
-        participantKey: 'e1+e2',
-        participantIds: '["e1","e2"]',
-        lastMessage: null,
-        lastMessageAt: null,
-        unreadCount: 0,
-        pinned: false,
-        archived: false,
-        replyMode: 'realistic',
-      },
-    ]);
-  });
-
-  it('carries the pre-hydrated chat-list fields through (last message, unread, pin/archive, reply mode)', async () => {
-    const server = createMockManagementServer([
-      {
-        method: 'GET',
-        path: /chat-list/,
-        json: {
-          conversations: [
-            chatListRow({
-              last_message: {
-                id: 'm9',
-                entity_id: 'e1',
-                sender_entity_id: 'e2',
-                interaction_id: 'i1',
-                content: 'see you tonight',
-                message_type: 'text',
-                emotional_state_bits: 0,
-                is_recon_followup: false,
-                is_edited: false,
-                is_pinned: false,
-                is_read: false,
-                created_at: '2026-10-11T10:00:00Z',
-                updated_at: '2026-10-11T10:00:00Z',
-                deleted_at: null,
-              },
-              last_message_at: '2026-10-11T10:00:00Z',
-              unread_count: 3,
-              pinned: true,
-              archived: true,
-              reply_mode: 'instant',
-            }),
-          ],
-          has_more: false,
-          next_offset: null,
-        },
-      },
-    ]);
-    install(server);
-    const [row] = await interactionsRepo.getPhoneConversationsPage('e1', {
-      limit: 20,
-      offset: 0,
-    });
-
-    expect(row.lastMessage?.content).toBe('see you tonight');
-    expect(row.lastMessage?.created_at.toISOString()).toBe('2026-10-11T10:00:00.000Z');
-    expect(row.lastMessageAt).toBe('2026-10-11T10:00:00Z');
-    expect(row.unreadCount).toBe(3);
-    expect(row.pinned).toBe(true);
-    expect(row.archived).toBe(true);
-    expect(row.replyMode).toBe('instant');
-  });
-
   it('derives the sorted pair key for entityHasPhoneInteraction', async () => {
     const server = createMockManagementServer([
       {
@@ -454,7 +377,7 @@ describe('conversation_messages adapter', () => {
     expect(base64).toBe('AQID');
   });
 
-  it('builds unread counts from the chat-list pages', async () => {
+  it('builds unread counts from the global inbox pages', async () => {
     const server = createMockManagementServer([
       {
         method: 'GET',

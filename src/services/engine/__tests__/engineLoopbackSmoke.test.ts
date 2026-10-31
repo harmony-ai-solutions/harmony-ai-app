@@ -50,7 +50,6 @@ function templateToRegExp(template: string): RegExp {
 const DRIVERS: Record<string, () => Promise<unknown>> = {
   'entities.list': () => engineApiClient.listEntities(),
   'entities.get': () => engineApiClient.getEntityConfig('ent-1'),
-  'entities.chatList': () => engineApiClient.entityChatList('ent-1'),
   'entities.messages': () => engineApiClient.entityMessages('ent-1', 'ent-1+ent-2'),
   'entities.interactions': () => engineApiClient.entityInteractions('ent-1'),
   'entities.emojiActions': () => engineApiClient.entityEmojiActions('ent-1'),

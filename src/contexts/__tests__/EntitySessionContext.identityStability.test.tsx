@@ -12,7 +12,7 @@
  *   2. `startInteractionSession` / `isSessionActive` were plain functions rebuilt
  *      on every render, so every recompute handed consumers NEW identities.
  *      ChatDetailScreen lists them as deps of its `initializeSession`; the init
- *      effect therefore re-fired, paid GET /api/entities/:id/chat-list (~330 ms)
+ *      effect therefore re-fired, paid a chat-list read (~330 ms)
  *      and a reused INIT, and the cycle repeated forever.
  *
  * Both are pinned here: a reused start must not change the map reference and the

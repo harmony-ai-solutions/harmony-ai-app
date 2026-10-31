@@ -2,7 +2,7 @@
  * Conversation messages — management-API-backed repository adapter (task 3-2).
  *
  * Backed by `GET /api/entities/:id/conversations/:participantKey/messages`
- * (paginated, blob-free, chronological) and the chat-list endpoint for derived
+ * (paginated, blob-free, chronological) and the GLOBAL inbox for derived
  * unread counts. The `before` cursor is OPAQUE — pass the previous response's
  * `next_cursor`; never synthesize it from a parsed Date (the engine stores
  * timestamps in mixed formats). Message audio/image bytes ride the dedicated
@@ -38,6 +38,7 @@ import { engineApiClient } from '../EngineApiClient';
 import { EngineApiUnsupportedError } from '../EngineApiClient';
 import type { MessagePatchDto } from '../EngineApiClient';
 import { mapConversationMessage } from '../engineApiMappers';
+import { getGlobalInboxPage } from './interactions';
 
 /**
  * Paginated message window (chronological, oldest-first). `before` is the
@@ -224,7 +225,7 @@ export async function getConversationMessageAudioBase64(
 
 /**
  * Batched unread counts keyed by participant_key, scoped to the POV entity.
- * Derived from the chat-list endpoint (unread_count per conversation), which is
+ * Derived from the GLOBAL inbox (unread_count per conversation), which is
  * paginated — we walk pages until exhausted or a safety cap is hit.
  */
 export async function getUnreadCountByParticipantKeys(
@@ -239,17 +240,14 @@ export async function getUnreadCountByParticipantKeys(
   const maxPages = 25; // safety cap: 5000 conversations
   let offset = 0;
   for (let page = 0; page < maxPages; page++) {
-    const res = await engineApiClient.entityChatList(ownEntityId, {
-      limit: pageSize,
-      offset,
-    });
-    for (const row of res.conversations ?? []) {
-      if (wanted.has(row.participant_key)) {
-        result.set(row.participant_key, row.unread_count ?? 0);
+    const inbox = await getGlobalInboxPage(ownEntityId, { limit: pageSize, offset });
+    for (const row of inbox.rows) {
+      if (wanted.has(row.participantKey)) {
+        result.set(row.participantKey, row.unreadCount ?? 0);
       }
     }
-    if (!res.has_more || res.next_offset == null) break;
-    offset = res.next_offset;
+    if (!inbox.hasMore || inbox.nextOffset == null) break;
+    offset = inbox.nextOffset;
   }
   return result;
 }

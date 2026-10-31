@@ -33,7 +33,7 @@ import { fetchAutonomyBeatsPerDay } from '../cloud/soulbitsClient';
 import { connectEngine, disconnectEngine, getEngineConnection } from './EngineService';
 import type { EngineConnection } from './EngineService';
 import { selectEngineHost } from './EngineHost';
-import { engineApiClient } from './EngineApiClient';
+import { getGlobalInboxPage } from './repositories/interactions';
 import {
   BATCH_PRIORITY_MOST_OVERDUE,
   LIFECYCLE_BATCH_METHOD,
@@ -231,15 +231,24 @@ export function perWakeMaxBeats(dailyBudget: number | null): number {
 
 /**
  * Default outreach composer: read the entity's newest conversation's last
- * message and relay it as a banner (best-effort — a read failure yields a
- * data-only notice so the relay still fires, or null to skip).
+ * message from the GLOBAL inbox and relay it as a banner (best-effort — a read
+ * failure yields a data-only notice so the relay still fires, or null to skip).
+ *
+ * The inbox is pinned-first, so a small page is scanned for the genuinely
+ * newest last-message time instead of trusting row 0 (a pinned older thread
+ * would otherwise win the banner).
  */
 async function composeOutreachFromEngine(entityId: string): Promise<OutreachNotice | null> {
   try {
-    const chat = await engineApiClient.entityChatList(entityId, { limit: 1 });
-    const row = chat.conversations?.[0];
-    const body = row?.last_message?.content?.trim();
-    const messageId = row?.last_message?.id?.trim();
+    const page = await getGlobalInboxPage(entityId, { limit: 20, offset: 0 });
+    let newest: (typeof page.rows)[number] | null = null;
+    for (const row of page.rows) {
+      if (!row.lastMessage?.content?.trim()) continue;
+      // RFC3339 timestamps sort lexicographically; a missing time loses.
+      if (!newest || (row.lastMessageAt ?? '') > (newest.lastMessageAt ?? '')) newest = row;
+    }
+    const body = newest?.lastMessage?.content?.trim();
+    const messageId = newest?.lastMessage?.id?.trim();
     if (body) {
       return { entityId, body, messageId, payload: outreachPayload(entityId, messageId) };
     }

@@ -8,13 +8,14 @@
  * so {@link setReplyMode} is a deliberate no-op on the repo layer (the engine
  * stores the mode when the WS event lands).
  *
- * Reads: the engine's chat-list (`GET /api/entities/:id/chat-list`) folds
- * pinned/archived/reply_mode per conversation; the adapter composes the
- * participant-key-scoped reads from it.
+ * Reads: the engine's GLOBAL inbox (`GET /api/entities/chat-list`) folds
+ * pinned/archived/reply_mode/unread per conversation; the adapter composes the
+ * participant-key-scoped reads from it (active rows plus the separate archived
+ * array). There is no per-entity chat-list route anymore.
  */
 
 import { engineApiClient } from '../EngineApiClient';
-import type { ChatListRowDto } from '../EngineApiClient';
+import { getGlobalInboxPage, type PhoneConversationPageRow } from './interactions';
 
 export interface ChatConversationSettings {
   participantKey: string;
@@ -48,21 +49,43 @@ function entitiesInKey(participantKey: string): string[] {
   return participantKey.split('+').map(s => s.trim()).filter(Boolean);
 }
 
-/** Find one conversation's settings by scanning an entity's chat-list. */
+/**
+ * Every conversation row the settings read needs: active rows plus the
+ * separate bounded archived array, from ONE global-inbox call. `entityId` is
+ * the POV; omit it for the unpivoted companion view.
+ */
+async function readConversationRows(
+  entityId?: string | null,
+): Promise<PhoneConversationPageRow[]> {
+  const page = await getGlobalInboxPage(entityId ?? undefined, {
+    limit: 200,
+    offset: 0,
+    includeArchived: true,
+  });
+  return [...page.rows, ...page.archived];
+}
+
+function toSettings(
+  row: PhoneConversationPageRow,
+  entityId: string | null,
+): ChatConversationSettings {
+  return {
+    participantKey: row.participantKey,
+    entityId: entityId ?? row.entityId ?? null,
+    pinned: !!row.pinned,
+    archived: !!row.archived,
+    replyMode: row.replyMode === 'instant' ? 'instant' : 'realistic',
+  };
+}
+
+/** Find one conversation's settings by scanning the global inbox. */
 async function settingsFromChatList(
   entityId: string,
   participantKey: string,
 ): Promise<ChatConversationSettings | null> {
-  const res = await engineApiClient.entityChatList(entityId, { limit: 200 });
-  const row = (res.conversations ?? []).find(c => c.participant_key === participantKey);
-  if (!row) return null;
-  return {
-    participantKey: row.participant_key,
-    entityId,
-    pinned: !!row.pinned,
-    archived: !!row.archived,
-    replyMode: row.reply_mode === 'instant' ? 'instant' : 'realistic',
-  };
+  const rows = await readConversationRows(entityId);
+  const row = rows.find(r => r.participantKey === participantKey);
+  return row ? toSettings(row, entityId) : null;
 }
 
 /** Settings for a conversation; the default (all-off) when none exist. */
@@ -85,11 +108,10 @@ export async function getChatConversationSettings(
 /**
  * Settings for many conversations (used by the chat list).
  *
- * `entityId` is the POV entity: its chat-list already folds pinned/archived per
- * conversation, so ONE read usually resolves every wanted key. Partner entity
- * ids are only queried (in parallel) for the keys that read did not cover — the
- * old implementation scanned every entity embedded in every participant key
- * sequentially (21 round-trips for a 20-row page).
+ * `entityId` is the POV entity: its global inbox already folds pinned/archived
+ * per conversation, so ONE read resolves every wanted key. Any key the pivoted
+ * read did not cover is resolved from the single unpivoted global page (every
+ * thread) — never a per-partner fan-out.
  */
 export async function getChatConversationSettingsBatch(
   participantKeys: string[],
@@ -100,47 +122,33 @@ export async function getChatConversationSettingsBatch(
   const wanted = new Set(participantKeys);
   const unmatched = new Set(participantKeys);
 
-  const absorb = (id: string, rows: readonly ChatListRowDto[] | undefined): void => {
-    for (const row of rows ?? []) {
-      if (!wanted.has(row.participant_key)) continue;
-      unmatched.delete(row.participant_key);
-      result.set(row.participant_key, {
-        participantKey: row.participant_key,
-        entityId: id,
-        pinned: !!row.pinned,
-        archived: !!row.archived,
-        replyMode: row.reply_mode === 'instant' ? 'instant' : 'realistic',
-      });
+  const absorb = (id: string | null, rows: readonly PhoneConversationPageRow[]): void => {
+    for (const row of rows) {
+      if (!wanted.has(row.participantKey)) continue;
+      unmatched.delete(row.participantKey);
+      result.set(row.participantKey, toSettings(row, id));
     }
   };
 
-  // 1. The POV entity's chat-list covers every conversation it participates in
-  //    (all of them in practice) — one request, no partner fan-out.
+  // 1. The POV entity's global inbox covers every conversation it participates
+  //    in (all of them in practice) — one request, no partner fan-out.
   if (entityId) {
     try {
-      const res = await engineApiClient.entityChatList(entityId, { limit: 200 });
-      absorb(entityId, res.conversations);
+      absorb(entityId, await readConversationRows(entityId));
     } catch {
-      // A failed POV read must not break the batch — partners are tried below.
+      // A failed POV read must not break the batch — the unpivoted read below
+      // still has a chance.
     }
     if (unmatched.size === 0) return result;
   }
 
-  // 2. Fall back to the remaining candidate entity ids, all in parallel.
-  const entityIds = new Set<string>();
-  for (const key of unmatched) for (const id of entitiesInKey(key)) entityIds.add(id);
-  if (entityId) entityIds.delete(entityId);
-
-  await Promise.all(
-    [...entityIds].map(async id => {
-      try {
-        const res = await engineApiClient.entityChatList(id, { limit: 200 });
-        absorb(id, res.conversations);
-      } catch {
-        // A failed entity read must not break the batch.
-      }
-    }),
-  );
+  // 2. Resolve whatever is left from the SINGLE unpivoted view (every thread),
+  //    filtered by participant key — still one request, never one per partner.
+  try {
+    absorb(null, await readConversationRows(undefined));
+  } catch {
+    // A failed read must not break the batch — unresolved keys stay absent.
+  }
   return result;
 }
 
@@ -171,8 +179,8 @@ export async function setConversationArchived(
 /** True when any conversation settings exist for the entity (archive section gate). */
 export async function conversationSettingsExistForEntity(entityId: string): Promise<boolean> {
   try {
-    const res = await engineApiClient.entityChatList(entityId, { limit: 200 });
-    return (res.conversations ?? []).some(c => c.pinned || c.archived);
+    const rows = await readConversationRows(entityId);
+    return rows.some(row => row.pinned || row.archived);
   } catch {
     return false;
   }
@@ -183,23 +191,9 @@ export async function listConversationsByFlag(
   flag: 'pinned' | 'archived',
   entityId?: string | null,
 ): Promise<ChatConversationSettings[]> {
-  const list: ChatConversationSettings[] = [];
-  const entityIds = entityId ? [entityId] : [];
-  for (const id of entityIds) {
-    const res = await engineApiClient.entityChatList(id, { limit: 200 });
-    for (const row of res.conversations ?? []) {
-      if (row[flag]) {
-        list.push({
-          participantKey: row.participant_key,
-          entityId: id,
-          pinned: !!row.pinned,
-          archived: !!row.archived,
-          replyMode: row.reply_mode === 'instant' ? 'instant' : 'realistic',
-        });
-      }
-    }
-  }
-  return list;
+  if (!entityId) return [];
+  const rows = await readConversationRows(entityId);
+  return rows.filter(row => !!row[flag]).map(row => toSettings(row, entityId));
 }
 
 /** Read the synced reply-pacing mode for a conversation. */

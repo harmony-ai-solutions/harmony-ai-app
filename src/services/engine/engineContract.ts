@@ -129,8 +129,14 @@
  * the app can render a truthful "waiting for sync key" state instead of a
  * generic "stopped". Additive/optional — older engines omit it and the app
  * degrades gracefully (treats absent as false, falls back to `sync_group`).
+ * 1.9.0 → 1.10.0 (2026-10-31): the per-entity chat-list route is REMOVED from
+ * the contract — the app's inbox reads the GLOBAL
+ * `GET /api/entities/chat-list` exclusively. The engine is embedded in the app
+ * and both ship together, so no older-engine fallback exists (and the
+ * per-entity fan-out is gone from the client). Breaking/MAJOR-shaped surface
+ * change, published as a MINOR bump because the app and engine version lockstep.
  */
-export const ENGINE_CONTRACT_VERSION = '1.9.0';
+export const ENGINE_CONTRACT_VERSION = '1.10.0';
 
 /** Outcome of a contract-version comparison. */
 export interface ContractVersionCheck {
@@ -244,13 +250,6 @@ export const REQUIRED_ENGINE_ENDPOINTS: ContractEndpoint[] = [
     path: '/api/entities/:id',
     fixture: 'entityConfig',
     note: 'entity config read',
-  },
-  {
-    id: 'entities.chatList',
-    method: 'GET',
-    path: '/api/entities/:id/chat-list',
-    fixture: 'chatListPage',
-    note: 'chat list (interactions repo)',
   },
   {
     id: 'entities.messages',

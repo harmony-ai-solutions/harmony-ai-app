@@ -4,14 +4,12 @@
  * A full `render(<ChatListScreen />)` is not viable in the node test env (see
  * the header of ChatListScreen.test.tsx — RN 0.86's core index lazy-getters
  * crash it), so the load path is pinned at its exported seams:
- *  - `readInboxPage` — one inbox page read: the GLOBAL endpoint first, the
- *    legacy per-entity fan-out as the transparent fallback (mock management
- *    server, exactly like the repository tests).
+ *  - `readInboxPage` — one inbox page read from the GLOBAL endpoint (the only
+ *    inbox route: the engine is embedded and ships with the app, so there is
+ *    no older-engine per-entity fallback).
  *  - `planInboxRows` — Phase-A planning (blocked / deleted / group guards).
- *  - `arrangeChatListItems` — server order is authoritative on the global
- *    path; only the legacy path is re-sorted client-side.
  *  - `mergeArchivedInboxRows` — the global archived array folds into the same
- *    archived section as the per-entity path.
+ *    archived section the screen splits out.
  */
 
 jest.mock('../../utils/logger', () => ({
@@ -22,12 +20,10 @@ import { engineApiClient } from '../../services/engine/EngineApiClient';
 import { resetEngineServiceForTests, setEngineConnection } from '../../services/engine/EngineService';
 import { createMockManagementServer } from '../../services/engine/__tests__/mockManagementServer';
 import {
-  arrangeChatListItems,
   mergeArchivedInboxRows,
   planInboxRows,
   readInboxPage,
 } from '../ChatListScreen';
-import type { ChatListItem } from '../ChatListScreen';
 import type { PhoneConversationPageRow } from '../../services/engine/repositories/interactions';
 
 const CONN = {
@@ -75,30 +71,6 @@ afterAll(() => {
   resetEngineServiceForTests();
 });
 
-function chatListItem(over: Partial<ChatListItem> = {}): ChatListItem {
-  return {
-    interactionId: 'i1',
-    entityId: 'e2',
-    characterId: 'p1',
-    characterName: 'Aria',
-    lastMessage: 'hi',
-    lastMessageSender: 'Aria',
-    lastMessageTime: new Date('2026-10-01T00:00:00Z'),
-    avatarUri: null,
-    avatarProfileId: 'p1',
-    participantKey: 'user+e2',
-    participantIds: ['user', 'e2'],
-    isGroup: false,
-    pinned: false,
-    archived: false,
-    muted: false,
-    disabled: false,
-    locked: false,
-    unreadCount: 0,
-    ...over,
-  };
-}
-
 describe('readInboxPage — global path', () => {
   it('returns rows in SERVER order (the global contract forbids a client re-sort)', async () => {
     // Server order deliberately contradicts recency: the OLDER thread comes
@@ -132,29 +104,12 @@ describe('readInboxPage — global path', () => {
 
     const page = await readInboxPage({ povEntityId: 'user', limit: 20, offset: 0 });
 
-    expect(page.source).toBe('global');
-    expect(page.globalUnsupported).toBe(false);
     expect(page.rows.map(row => row.participantKey)).toEqual(['user+e2', 'user+e3']);
     // Rows arrive pre-hydrated, so the screen's Phase-B fallbacks stay no-ops.
     expect(page.rows[0].pinned).toBe(false);
     expect(page.rows[0].archived).toBe(false);
     expect(page.rows[0].unreadCount).toBe(0);
     expect(page.rows[0].lastMessage).toBeNull();
-
-    // The screen arranges global rows by passthrough; the legacy path sorts.
-    const asItems = page.rows.map((row, index) =>
-      chatListItem({
-        participantKey: row.participantKey,
-        lastMessageTime: new Date(row.lastMessageAt ?? '2026-10-01T00:00:00Z'),
-        interactionId: row.interactionId || `i${index}`,
-      }),
-    );
-    expect(
-      arrangeChatListItems([...asItems], true).map(item => item.participantKey),
-    ).toEqual(['user+e2', 'user+e3']);
-    expect(
-      arrangeChatListItems([...asItems], false).map(item => item.participantKey),
-    ).toEqual(['user+e3', 'user+e2']);
   });
 
   it('asks for the archived array on page 0 and merges it alongside active rows', async () => {
@@ -223,78 +178,8 @@ describe('readInboxPage — global path', () => {
     expect(server.lastCall('GET', '/api/entities/chat-list')!.query.offset).toBe('40');
     expect(page.rows[0].participantKey).toBe('user+40');
   });
-});
 
-describe('readInboxPage — fallback to the per-entity path', () => {
-  const perEntityRow = (over: Record<string, unknown> = {}) => ({
-    interaction_id: 'i1',
-    participant_key: 'user+e2',
-    interaction_scope: 'private',
-    participant_ids: '["user","e2"]',
-    last_message: null,
-    last_message_at: null,
-    unread_count: 1,
-    pinned: false,
-    archived: false,
-    reply_mode: 'realistic',
-    ...over,
-  });
-
-  it('falls back when the connected engine has no global route (404)', async () => {
-    // Only the per-entity route exists → the global call 404s.
-    const server = createMockManagementServer([
-      {
-        method: 'GET',
-        path: /\/api\/entities\/[^/]+\/chat-list$/,
-        json: { conversations: [perEntityRow()], has_more: false, next_offset: null },
-      },
-    ]);
-    install(server);
-
-    const page = await readInboxPage({ povEntityId: 'user', limit: 1, offset: 0 });
-
-    expect(page.source).toBe('per-entity');
-    expect(page.globalUnsupported).toBe(true);
-    expect(page.rows.map(row => row.participantKey)).toEqual(['user+e2']);
-    // Per-entity pages signal "more" by returning a full page.
-    expect(page.hasMore).toBe(true);
-    expect(page.nextOffset).toBe(1);
-    expect(page.archivedRows).toEqual([]);
-
-    const call = server.lastCall('GET', /\/api\/entities\/[^/]+\/chat-list$/)!;
-    expect(call.path).toBe('/api/entities/user/chat-list');
-    expect(call.query).toEqual({ limit: '1', offset: '0' });
-  });
-
-  it('does not retry the unsupported global route once the caller has learned it', async () => {
-    const server = createMockManagementServer([
-      {
-        method: 'GET',
-        path: /\/api\/entities\/[^/]+\/chat-list$/,
-        json: { conversations: [], has_more: false, next_offset: null },
-      },
-    ]);
-    install(server);
-
-    await readInboxPage({ povEntityId: 'user', limit: 20, offset: 0 });
-    const globalCallsAfterFirst = server.calls.filter(
-      call => call.path === '/api/entities/chat-list',
-    ).length;
-
-    const page = await readInboxPage({
-      povEntityId: 'user',
-      limit: 20,
-      offset: 20,
-      preferGlobal: false,
-    });
-
-    expect(page.source).toBe('per-entity');
-    expect(
-      server.calls.filter(call => call.path === '/api/entities/chat-list').length,
-    ).toBe(globalCallsAfterFirst);
-  });
-
-  it('does NOT swallow a real engine failure (only 404/unsupported falls back)', async () => {
+  it('does NOT swallow a real engine failure — there is no fallback to hide behind', async () => {
     const server = createMockManagementServer([
       {
         method: 'GET',

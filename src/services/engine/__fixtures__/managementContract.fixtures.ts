@@ -21,7 +21,6 @@
 
 import type {
   ChatListRowDto,
-  ChatListResponseDto,
   CharacterImageInfoDto,
   CharacterProfileDto,
   CharacterStatsResponseDto,
@@ -59,7 +58,7 @@ import type { LanSyncPairingPayload, SyncPairingPayload } from '../../sync/syncC
  * otherwise (bumping one side without the other is the deliberate-drift canary
  * the plan asks for).
  */
-export const FIXTURE_CONTRACT_VERSION = '1.9.0';
+export const FIXTURE_CONTRACT_VERSION = '1.10.0';
 
 const CREATED = '2026-10-12T09:00:00Z';
 const UPDATED = '2026-10-12T10:00:00Z';
@@ -393,12 +392,6 @@ export const engineLogEntryFixture: EngineLogEntryDto = {
 
 // ── Response envelopes ─────────────────────────────────────────────────────
 
-const chatListPageFixture: ChatListResponseDto = {
-  conversations: [chatListRowFixture],
-  has_more: false,
-  next_offset: null,
-};
-
 const messagesPageFixture: MessagesResponseDto = {
   messages: [conversationMessageFixture],
   has_more: false,
@@ -613,7 +606,6 @@ export const outreachNotificationLiveEventFixture = {
 export const CONTRACT_FIXTURES: Record<string, unknown> = {
   conversationMessage: conversationMessageFixture,
   chatListRow: chatListRowFixture,
-  chatListPage: chatListPageFixture,
   messagesPage: messagesPageFixture,
   interaction: interactionFixture,
   interactionsPage: interactionsPageFixture,
