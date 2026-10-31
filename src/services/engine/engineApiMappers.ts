@@ -14,6 +14,7 @@
 
 import type {
   CharacterImage,
+  CharacterCategory,
   CharacterProfile,
   ConversationMessage,
   EmotionState,
@@ -24,6 +25,7 @@ import type {
 } from '../../database/models';
 import type { EmotionEffect, MetabolismVector } from '../../types/emoji';
 import type {
+  CharacterCategoryDto,
   CharacterImageInfoDto,
   CharacterProfileDto,
   ConversationMessageDto,
@@ -203,6 +205,32 @@ export function mapEntityConfig(id: string, cfg: EntityConfigDto): Entity {
     created_at: toDate(cfg.created_at),
     updated_at: toDate(cfg.updated_at),
     deleted_at: toDateOrNull(cfg.deleted_at),
+  };
+}
+
+/**
+ * Map a character-category DTO to the app's `CharacterCategory` model.
+ *
+ * The wire row is already snake_case and flat; the only work is date coercion
+ * and normalizing the two repository PROJECTIONS (`member_count` /
+ * `profile_ids`) so callers never see `null`. Go marshals an empty slice as
+ * `null`, and an older engine may omit `member_count` entirely — the member
+ * list length is the honest fallback.
+ */
+export function mapCharacterCategory(dto: CharacterCategoryDto): CharacterCategory {
+  const profileIds = Array.isArray(dto.profile_ids)
+    ? dto.profile_ids.filter((id): id is string => typeof id === 'string')
+    : [];
+  return {
+    id: dto.id,
+    name: dto.name ?? '',
+    sort_order: toNum(dto.sort_order),
+    created_at: toDate(dto.created_at),
+    updated_at: toDate(dto.updated_at),
+    member_count: typeof dto.member_count === 'number'
+      ? toNum(dto.member_count)
+      : profileIds.length,
+    profile_ids: profileIds,
   };
 }
 

@@ -108,6 +108,25 @@ jest.mock('../../contexts/AppAlertContext', () => ({
   useAppAlert: () => ({ showAlert: mockShowAlert }),
 }));
 
+// Categories are SYNCED rows now (engine step 5, "path b"): the screen only
+// talks to the service for reads + the membership write. Mock the whole facade
+// so no engine client / AsyncStorage is touched; individual tests override
+// `getCategories`/`setProfileMembership` through these handles.
+const mockGetCategories = jest.fn();
+const mockSetProfileMembership = jest.fn();
+jest.mock('../../services/CategoryPreferencesService', () => ({
+  __esModule: true,
+  default: {
+    getCategories: (...args: unknown[]) => mockGetCategories(...args),
+    setProfileMembership: (...args: unknown[]) => mockSetProfileMembership(...args),
+    createCategory: jest.fn(),
+    renameCategory: jest.fn(),
+    deleteCategory: jest.fn(),
+    reorderCategories: jest.fn(),
+    migrateLegacyCategories: jest.fn(),
+  },
+}));
+
 jest.mock('../../contexts/BiometricLockContext', () => ({
   useBiometricLock: () => ({ withExternalFlow: (fn: any) => fn() }),
 }));
@@ -134,19 +153,6 @@ jest.mock('../../services/engine/repositories/characters', () => ({
   // Senju's load-path additions — empty results so loadFavoritesAndCategories
   // completes without favorites/category data.
   getFavoriteCharacterProfileIds: jest.fn().mockResolvedValue([]),
-}));
-
-// O6: custom categories persist in AsyncStorage via CategoryPreferencesService
-// (the old DB categories sidecar is gone). Tests start with no custom
-// categories; the filter chips then derive purely from profile tags.
-jest.mock('../../services/CategoryPreferencesService', () => ({
-  __esModule: true,
-  default: {
-    getCategories: jest.fn().mockResolvedValue([]),
-    createCategory: jest.fn(),
-    renameCategory: jest.fn(),
-    deleteCategory: jest.fn(),
-  },
 }));
 
 // The screen fetches the blocked-user id set from the SocialService stub and
@@ -364,13 +370,14 @@ jest.mock('../../components/characters/AICardPickerModal', () => {
 });
 
 // Long-press context menu: expose the "Create persona from this card" action
-// (decision 4/7/12 — immediate full-copy → editor).
+// (decision 4/7/12 — immediate full-copy → editor) and the "Add to category"
+// entry (membership write seam).
 jest.mock('../../components/characters/CharacterCardMenuModal', () => {
   const React = require('react');
   const { View } = require('react-native');
   return {
     __esModule: true,
-    CharacterCardMenuModal: ({ visible, onCreatePersonaFromCard }: any) =>
+    CharacterCardMenuModal: ({ visible, onCreatePersonaFromCard, onAddToCategory }: any) =>
       visible
         ? React.createElement(
             View,
@@ -378,6 +385,11 @@ jest.mock('../../components/characters/CharacterCardMenuModal', () => {
             React.createElement(View, {
               testID: 'menu-create-persona',
               onPress: () => onCreatePersonaFromCard(),
+              accessibilityRole: 'button',
+            }),
+            React.createElement(View, {
+              testID: 'menu-add-to-category',
+              onPress: () => onAddToCategory(),
               accessibilityRole: 'button',
             }),
           )
@@ -495,12 +507,13 @@ async function flush() {
   }
 }
 
-async function renderScreen() {
+async function renderScreen(categories: unknown[] = []) {
   mockGetAll.mockResolvedValue(PROFILES);
   mockGetImages.mockResolvedValue([]);
   mockGetImagesMetadata.mockResolvedValue([]);
   mockGetPrimaryImage.mockResolvedValue(null);
   mockGetDistinctTags.mockResolvedValue(ALL_TAGS);
+  mockGetCategories.mockResolvedValue(categories);
   // RNTL v14 `render` is async here (React 19) — await it like the existing
   // screen tests do (`await render(...)` in chatDetailScenarioGenerate.test).
   const utils = await render(<CharactersScreen />);
@@ -579,6 +592,65 @@ describe('CharactersScreen — creator filtering (4-3)', () => {
     // fireEvent here (it dispatches regardless of visibility).
     await fireEvent.press(utils.getByTestId('clear-filters'));
     expect(cardIds(utils)).toEqual(['card-p1', 'card-p2', 'card-p3']);
+  });
+});
+
+describe('CharactersScreen — synced category filtering (engine step 5)', () => {
+  const syncedCategory = (
+    id: string,
+    name: string,
+    profileIds: string[],
+  ) => ({
+    id,
+    name,
+    sort_order: 0,
+    created_at: new Date(0),
+    updated_at: new Date(0),
+    member_count: profileIds.length,
+    profile_ids: profileIds,
+  });
+
+  async function selectCategory(utils: RenderUtils, categoryId: string) {
+    await user.press(utils.getByTestId('category-filter-dropdown'));
+    await user.press(utils.getByTestId(`category-option-${categoryId}`));
+  }
+
+  it('filters by membership ROWS (not by profile tags)', async () => {
+    // "Heroes" contains p1 + p3 — neither carries a "heroes" tag.
+    const utils = await renderScreen([
+      syncedCategory('cat-heroes', 'Heroes', ['p1', 'p3']),
+    ]);
+
+    await selectCategory(utils, 'cat-heroes');
+
+    expect(cardIds(utils)).toEqual(['card-p1', 'card-p3']);
+    expect(utils.queryByTestId('card-p2')).toBeNull();
+  });
+
+  it('a tag matching a category NAME does not grant membership', async () => {
+    // p1/p2 carry the "fantasy" TAG, but the "Fantasy" CATEGORY has no
+    // membership rows — tags are no longer the category source.
+    const utils = await renderScreen([syncedCategory('cat-fantasy', 'Fantasy', [])]);
+
+    await selectCategory(utils, 'cat-fantasy');
+
+    expect(utils.queryAllByTestId(/^card-/)).toHaveLength(0);
+    expect(utils.getByText('categoryEmptyTitle')).toBeTruthy();
+  });
+
+  it('"Add to category" toggles a membership row through the service', async () => {
+    mockSetProfileMembership.mockResolvedValue(undefined);
+    const utils = await renderScreen([syncedCategory('cat-heroes', 'Heroes', [])]);
+
+    await user.press(utils.getByTestId('longpress-p1'));
+    await user.press(utils.getByTestId('menu-add-to-category'));
+    await user.press(utils.getByTestId('category-toggle-cat-heroes'));
+
+    expect(mockSetProfileMembership).toHaveBeenCalledWith('cat-heroes', 'p1', true);
+    // The profile's legacy tags are untouched by a category change — the screen
+    // never writes profiles for a category operation.
+    const profile = PROFILES.find(p => p.id === 'p1')!;
+    expect(JSON.parse(profile.tags ?? '[]')).toEqual(['fantasy', 'mage']);
   });
 });
 

@@ -311,6 +311,30 @@ export interface CharacterImageInfoDto {
   [key: string]: unknown;
 }
 
+/**
+ * A user-defined character CATEGORY (`/api/character-categories`).
+ *
+ * Since engine plan step 5 ("path b") `character_categories` +
+ * `character_category_members` are on the CHANGESET SYNC surface: the tables are
+ * the shared source of truth for the phone, and these management routes are the
+ * write path (the read path is this same list — the app has no local SQL
+ * replica). `member_count` / `profile_ids` are repository PROJECTIONS on the
+ * engine side, not columns: they make the chip count and the "Add to category"
+ * checkbox list need ONE request. `deleted_at` is deliberately not on the wire
+ * (the engine soft-deletes; a tombstone simply disappears from the list).
+ */
+export interface CharacterCategoryDto {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  /** Projection: how many profiles are members. */
+  member_count?: number;
+  /** Projection: the member profile ids (complete membership). */
+  profile_ids?: string[] | null;
+}
+
 /** Bytes fetched from a character-image route (original or thumbnail). */
 export interface CharacterImageBytesDto {
   /** Base64-encoded bytes (no `data:` prefix). */
@@ -2067,6 +2091,97 @@ export class EngineApiClient {
       'PUT',
       `/api/character-profiles/${encodeURIComponent(profileId)}/favorite`,
       { is_favorite: isFavorite },
+    );
+  }
+
+  // ── Character categories (sync-surface step 5, "path b") ───────────────
+  //
+  // `character_categories` + `character_category_members` are the SHARED
+  // source of truth for the phone (they ride the changeset sync). The app reads
+  // the list below and writes ONLY through these routes — never local SQL.
+  // Status-code contract (engine): 400 bad body/name, 404 absent, 409 live name
+  // conflict, 200/201 with the current category so the caller reconciles
+  // without a second GET.
+
+  /**
+   * Every live category in the user's drag order, with its member count and
+   * member profile ids. The engine may marshal an empty slice as `null`, so the
+   * result is normalized to `[]`.
+   */
+  listCharacterCategories(): Promise<CharacterCategoryDto[]> {
+    return this.getJson<CharacterCategoryDto[] | null>(
+      '/api/character-categories',
+    ).then(dtos => dtos ?? []);
+  }
+
+  /** Create a category (`POST {name}`); 409 when a LIVE category owns the name. */
+  createCharacterCategory(name: string): Promise<CharacterCategoryDto> {
+    return this.sendJson<CharacterCategoryDto>('POST', '/api/character-categories', {
+      name,
+    });
+  }
+
+  /** Rename a category (`PATCH /:id {name}`); 404 absent, 409 live name clash. */
+  renameCharacterCategory(
+    categoryId: string,
+    name: string,
+  ): Promise<CharacterCategoryDto> {
+    return this.sendJson<CharacterCategoryDto>(
+      'PATCH',
+      `/api/character-categories/${encodeURIComponent(categoryId)}`,
+      { name },
+    );
+  }
+
+  /** Soft-delete a category (`DELETE /:id`) — never touches character profiles. */
+  deleteCharacterCategory(categoryId: string): Promise<{ status: string; id: string }> {
+    return this.sendJson<{ status: string; id: string }>(
+      'DELETE',
+      `/api/character-categories/${encodeURIComponent(categoryId)}`,
+    );
+  }
+
+  /**
+   * Persist a new drag order (`POST /reorder {ordered_ids}`). Ids the engine no
+   * longer knows are skipped, so a stale drag never fails wholesale. Returns
+   * the re-ordered list.
+   */
+  reorderCharacterCategories(orderedIds: string[]): Promise<CharacterCategoryDto[]> {
+    return this.sendJson<CharacterCategoryDto[] | null>(
+      'POST',
+      '/api/character-categories/reorder',
+      { ordered_ids: orderedIds },
+    ).then(dtos => dtos ?? []);
+  }
+
+  /**
+   * Replace a category's COMPLETE membership (`POST /:id/members {profile_ids}`).
+   * Unchecking everything needs no separate call — an empty array clears it.
+   */
+  setCharacterCategoryMembers(
+    categoryId: string,
+    profileIds: string[],
+  ): Promise<CharacterCategoryDto> {
+    return this.sendJson<CharacterCategoryDto>(
+      'POST',
+      `/api/character-categories/${encodeURIComponent(categoryId)}/members`,
+      { profile_ids: profileIds },
+    );
+  }
+
+  /**
+   * Remove ONE membership (`DELETE /:id/members/:profileId`). Removing a
+   * membership that does not exist is a success (the intent already holds).
+   */
+  removeCharacterCategoryMember(
+    categoryId: string,
+    profileId: string,
+  ): Promise<{ status: string; category_id: string; profile_id: string }> {
+    return this.sendJson<{ status: string; category_id: string; profile_id: string }>(
+      'DELETE',
+      `/api/character-categories/${encodeURIComponent(categoryId)}/members/${encodeURIComponent(
+        profileId,
+      )}`,
     );
   }
 

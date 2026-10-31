@@ -3,8 +3,9 @@
  *
  * Opens from the long-press character-card context menu ("Add to category").
  * Shows every category as a toggleable row (checked = the character belongs
- * to it). Toggling a row immediately persists via the client-only category
- * repository.
+ * to it). Toggling a row immediately persists via the synced category
+ * repository (engine `character_category_members` — a membership row, never a
+ * profile tag).
  */
 
 import React, { useState, useEffect } from 'react';
@@ -151,6 +152,7 @@ export const AddToCategoryModal: React.FC<AddToCategoryModalProps> = ({
                           handleToggle(category.id);
                         }}
                         activeOpacity={0.7}
+                        testID={`category-toggle-${category.id}`}
                         style={[
                           styles.row,
                           {

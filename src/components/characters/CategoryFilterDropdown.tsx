@@ -201,6 +201,9 @@ export const CategoryFilterDropdown: React.FC<CategoryFilterDropdownProps> = ({
                       <TouchableOpacity
                         onPress={() => handleSelect(item.id)}
                         activeOpacity={0.65}
+                        testID={`category-option-${item.id}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isSelected }}
                         style={[
                           styles.optionRow,
                           isSelected && { backgroundColor: accent + '18' },

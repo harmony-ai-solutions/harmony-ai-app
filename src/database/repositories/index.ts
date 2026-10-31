@@ -10,6 +10,7 @@
 
 export * from '../../services/engine/repositories/entities';
 export * from '../../services/engine/repositories/characters';
+export * from '../../services/engine/repositories/characterCategories';
 export * from '../../services/engine/repositories/userEntities';
 export * from '../../services/engine/repositories/interactions';
 export * from '../../services/engine/repositories/conversation_messages';

@@ -5,8 +5,8 @@
  * the "Manage categories" chip next to the category filter chips.
  *
  * The modal is intentionally UI-only: every mutation calls straight into the
- * client-only category repository and reports back via `onChange` so the
- * screen can refresh its chip row.
+ * synced category service (engine management routes) and reports back via
+ * `onChange` so the screen can refresh its chip row.
  */
 
 import React, { useState, useCallback, useRef } from 'react';

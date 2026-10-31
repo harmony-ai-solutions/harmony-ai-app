@@ -31,6 +31,11 @@ import { loadHapticPreference } from './src/utils/haptics';
 import { probeRestoreOfferOnce } from './src/services/backup/restoreOnboarding';
 import { onBubbleOpen } from './src/services/ChatBubbleService';
 import ChatPreferencesService from './src/services/ChatPreferencesService';
+import CategoryPreferencesService from './src/services/CategoryPreferencesService';
+import {
+  getEngineConnection,
+  onEngineConnectionChange,
+} from './src/services/engine/EngineService';
 import type { BubbleConversation } from './src/services/ChatBubbleService';
 
 /**
@@ -89,6 +94,28 @@ function AppShell() {
     // than the chat-list seam so it runs exactly once per launch regardless of
     // which screen first touches the preference service.
     ChatPreferencesService.sweepLegacyEntityPrefs().catch(() => {});
+  }, []);
+
+  // One-time fold of the pre-sync category list (AsyncStorage names +
+  // tag-derived membership) into the synced `character_categories` tables
+  // (engine step 5, "path b"). It WRITES engine rows, so it waits for the
+  // embedded engine to be reachable instead of racing the cold-start boot —
+  // otherwise every upgrade launch would fail before the engine is up. Guarded
+  // by its own flag and idempotent: a partial failure retries next launch.
+  useEffect(() => {
+    let ran = false;
+    const run = () => {
+      if (ran) return;
+      ran = true;
+      CategoryPreferencesService.migrateLegacyCategories().catch(() => {});
+    };
+    if (getEngineConnection() !== null) {
+      run();
+      return;
+    }
+    return onEngineConnectionChange(connection => {
+      if (connection !== null) run();
+    });
   }, []);
 
   // Floating chat bubble → when the user taps the bubble, bring the app to

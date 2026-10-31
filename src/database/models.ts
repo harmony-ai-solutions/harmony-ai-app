@@ -663,3 +663,28 @@ export interface EmojiAction {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * A character category (`character_categories` on the engine).
+ *
+ * Since engine plan step 5 ("path b") this table — plus the
+ * `character_category_members` junction — is on the CHANGESET SYNC surface, so
+ * the phone and the desktop share ONE category list. The app has no local SQL
+ * replica any more: this row is what the management API returns.
+ *
+ * `member_count` / `profile_ids` are engine PROJECTIONS of the junction, not
+ * columns — they let the chip count and the membership checkbox list resolve
+ * from a single read. `deleted_at` never reaches the wire (a soft-deleted
+ * category simply disappears from the list).
+ */
+export interface CharacterCategory {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+  /** Projection: how many profiles belong to the category. */
+  member_count: number;
+  /** Projection: the member profile ids (the complete membership). */
+  profile_ids: string[];
+}
