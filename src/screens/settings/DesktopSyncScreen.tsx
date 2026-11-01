@@ -44,6 +44,11 @@ import {
   recoverRelayAuth as recoverRelayAuthService,
 } from '../../services/sync/relayAuthRecovery';
 import {
+  applySyncClientConfig,
+  reconcileSyncClientConfig,
+} from '../../services/sync/syncClientConfigApply';
+import type { SyncClientIntent } from '../../services/sync/syncClientConfigApply';
+import {
   parseSyncPairingPayload,
   parseSyncPairingPayloadV2,
   accountHintMatches,
@@ -377,6 +382,17 @@ export const DesktopSyncScreen: React.FC = () => {
   const recoveringRef = useRef(false);
   const rotationRelayedRef = useRef(false);
   const scanProcessingRef = useRef(false);
+  /**
+   * True once the user has EDITED a connectivity field in the (Advanced) form
+   * without applying it. Only then may a refresh pass reconcile — otherwise a
+   * refresh is a pure status read. This is what keeps a pull-to-refresh from
+   * becoming the no-op PUT that restarted the engine's sync client
+   * (2026-11 field log): the engine treats every PUT as a config change.
+   */
+  const dirtyRef = useRef(false);
+  const markDirty = useCallback(() => {
+    dirtyRef.current = true;
+  }, []);
 
   // Default the device name to the model name (best-effort; a test/mock
   // without getModel falls back).
@@ -455,6 +471,62 @@ export const DesktopSyncScreen: React.FC = () => {
     [recoverRelayAuth, storeVariant],
   );
 
+  /**
+   * The desired config assembled from the (Advanced) form — the ONE intent this
+   * screen ever sends to `PUT /api/sync/client`.
+   *
+   * CLIENT-ROLE HYGIENE (2026-11): a phone is always the CLIENT of the desktop;
+   * it never sets `role`, authority/bridge switches or asks for a handover.
+   * Those concepts do not exist in this intent at all, and the service that
+   * sends it strips any authority-flavoured key as defence in depth. The
+   * engine-side guard against a stray authority claim is not a licence to send
+   * one from here.
+   *
+   * CONTRACT SHAPE (engine `syncclient.ValidateConfig`): the engine validates
+   * the MERGED block, so the relay form explicitly clears the LAN-only fields
+   * (addresses + TOFU pin) — a leftover LAN address must never shadow the relay
+   * config. LAN-only fields are only sent for the LAN transport.
+   */
+  const formIntent = useCallback((): SyncClientIntent => {
+    // Store: the LAN transport is hidden, so always build the cloud-relay intent.
+    if (transport === 'relay' || storeVariant) {
+      return {
+        transport: 'relay',
+        relay_url: relayUrl.trim(),
+        device_id: deviceId.trim(),
+        dataset_id: datasetId.trim(),
+        device_name: deviceName.trim(),
+        peer_address: '',
+        peer_wss_address: '',
+        peer_fingerprint: '',
+      };
+    }
+    return {
+      transport: 'lan',
+      peer_address: peerAddress.trim(),
+      peer_wss_address: peerWssAddress.trim(),
+      security_mode: securityMode,
+      device_name: deviceName.trim(),
+    };
+  }, [
+    transport,
+    relayUrl,
+    deviceId,
+    datasetId,
+    deviceName,
+    peerAddress,
+    peerWssAddress,
+    securityMode,
+    storeVariant,
+  ]);
+
+  // A ref so the refresh/focus callbacks read the CURRENT intent without being
+  // re-created on every keystroke (which would reset the status poll interval).
+  const formIntentRef = useRef(formIntent);
+  useEffect(() => {
+    formIntentRef.current = formIntent;
+  }, [formIntent]);
+
   const refreshStatus = useCallback(async () => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
@@ -513,6 +585,32 @@ export const DesktopSyncScreen: React.FC = () => {
     }
   }, []);
 
+  /**
+   * The refresh/focus reconcile (2026-11 fix). The status GET is the whole
+   * job; a PUT happens ONLY when the user has PENDING EDITS that genuinely
+   * differ from the live config. `mode: 'refresh'` compares connectivity fields
+   * only — never cosmetic ones (device name/id/dataset, which the app defaults
+   * from device info) and never a "repair" restart, because the engine owns its
+   * own reconnect/backoff.
+   *
+   * Before this fix every pull-to-refresh / auto-pickup re-sent the whole
+   * form. The engine treats every PUT as a config change and RESTARTS the sync
+   * client: session churn, and one restart raced the pre-ledger seed staging so
+   * the phone uploaded its seed twice (16:44:43Z / 18:16:29Z field log).
+   */
+  const reconcileFromForm = useCallback(async () => {
+    if (!dirtyRef.current) return; // nothing edited → nothing to send
+    try {
+      const result = await reconcileSyncClientConfig(formIntentRef.current());
+      if (result.action === 'applied') {
+        dirtyRef.current = false;
+        applyStatus(result.status);
+      }
+    } catch (e: any) {
+      log.warn('config reconcile failed:', e?.message ?? String(e));
+    }
+  }, [applyStatus]);
+
   // Poll while the screen is focused.
   useFocusEffect(
     useCallback(() => {
@@ -522,6 +620,7 @@ export const DesktopSyncScreen: React.FC = () => {
       // status cannot loop.
       recoveringRef.current = false;
       refreshStatus();
+      void reconcileFromForm();
       refreshGroupStatus();
       refreshRotationFlag();
       void refreshDesktopArtifacts();
@@ -534,36 +633,66 @@ export const DesktopSyncScreen: React.FC = () => {
         .catch(() => setAccount(null));
       const id = setInterval(refreshStatus, POLL_INTERVAL_MS);
       return () => clearInterval(id);
-    }, [refreshStatus, refreshGroupStatus, refreshRotationFlag, refreshDesktopArtifacts]),
+    }, [
+      refreshStatus,
+      reconcileFromForm,
+      refreshGroupStatus,
+      refreshRotationFlag,
+      refreshDesktopArtifacts,
+    ]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([
       refreshStatus(),
+      reconcileFromForm(),
       refreshGroupStatus(),
       refreshRotationFlag(),
       refreshDesktopArtifacts(),
     ]);
     setRefreshing(false);
-  }, [refreshStatus, refreshGroupStatus, refreshRotationFlag, refreshDesktopArtifacts]);
+  }, [refreshStatus, reconcileFromForm, refreshGroupStatus, refreshRotationFlag, refreshDesktopArtifacts]);
 
-  // Apply a config patch live; surface errors as a toast.
+  /**
+   * Apply a desired config through the ONE diffing entry point
+   * (`services/sync/syncClientConfigApply`): GET status → compare → PUT only on
+   * a real diff, with the intent validated against the engine's own contract
+   * BEFORE anything is sent.
+   *
+   * This is the fix for both engine-log incidents:
+   *   - a no-op PUT restarted the client for nothing (now `unchanged`, no PUT);
+   *   - an incomplete intent (enabled + LAN + empty address) was a doomed 400
+   *     (now rejected locally with plain-language copy, never sent).
+   */
   const apply = useCallback(
-    async (patch: Parameters<typeof engineApiClient.updateSyncClientConfig>[0]) => {
+    async (intent: SyncClientIntent) => {
       setBusy(true);
       try {
-        const next = await engineApiClient.updateSyncClientConfig(patch);
+        const result = await applySyncClientConfig(intent);
+        if (result.action === 'unavailable' || result.action === 'failed') {
+          log.error('update failed:', result.error);
+          showToast(t('applyFailed', { message: result.error }));
+          return null;
+        }
+        if (result.action === 'invalid') {
+          // The engine's own validation rule, applied locally: no 400, no
+          // restart, no authority-bridge fallout.
+          log.warn('config not applied:', result.problem.message);
+          showToast(t('applyInvalid', { reason: t(`configError_${result.problem.code}`) }));
+          return null;
+        }
+        // 'unchanged' | 'applied' — both leave a truthful status on screen.
+        const next = result.status;
         setStatus(next);
         setEnabled(next.config.enabled);
         setTransport(storeVariant ? 'relay' : (next.config.transport || transport));
         formLoadedRef.current = true;
+        dirtyRef.current = false;
+        if (result.action === 'unchanged') {
+          log.debug('config already live — no PUT sent (no client restart)');
+        }
         return next;
-      } catch (e: any) {
-        const message = e?.message ?? String(e);
-        log.error('update failed:', message);
-        showToast(t('applyFailed', { message }));
-        return null;
       } finally {
         setBusy(false);
       }
@@ -571,36 +700,20 @@ export const DesktopSyncScreen: React.FC = () => {
     [showToast, t, transport, storeVariant],
   );
 
-  const formPatch = useCallback(() => {
-    // Store: the LAN transport is hidden, so always build the cloud-relay patch.
-    if (transport === 'relay' || storeVariant) {
-      return {
-        transport: 'relay' as const,
-        relay_url: relayUrl.trim(),
-        device_id: deviceId.trim(),
-        dataset_id: datasetId.trim(),
-        device_name: deviceName.trim(),
-      };
-    }
-    return {
-      transport: 'lan' as const,
-      peer_address: peerAddress.trim(),
-      peer_wss_address: peerWssAddress.trim(),
-      security_mode: securityMode,
-      device_name: deviceName.trim(),
-    };
-  }, [transport, relayUrl, deviceId, datasetId, deviceName, peerAddress, peerWssAddress, securityMode, storeVariant]);
-
   const handleConnect = useCallback(async () => {
     hapticLightPress();
-    await apply({ enabled: true, ...formPatch() });
-  }, [apply, formPatch]);
+    await apply({ enabled: true, ...formIntent() });
+  }, [apply, formIntent]);
 
   const handleToggleEnabled = useCallback(
     async (next: boolean) => {
       if (next) {
-        setEnabled(true);
-        await apply({ enabled: true, ...formPatch() });
+        // NOT optimistic: the intent must be complete (paired / address set)
+        // and the engine must accept it before the switch claims "on". An
+        // incomplete intent is now refused LOCALLY instead of being sent as a
+        // doomed PUT (two HTTP 400s at 18:56:36Z in the field log).
+        const applied = await apply({ enabled: true, ...formIntent() });
+        if (!applied) setEnabled(status?.config.enabled ?? false);
         return;
       }
       // Disabling: warn about buffered writes when any are unforwarded.
@@ -612,17 +725,17 @@ export const DesktopSyncScreen: React.FC = () => {
             text: t('disableConfirm'),
             style: 'destructive',
             onPress: async () => {
-              setEnabled(false);
-              await apply({ enabled: false });
+              const applied = await apply({ enabled: false });
+              if (!applied) setEnabled(true);
             },
           },
         ]);
         return;
       }
-      setEnabled(false);
-      await apply({ enabled: false });
+      const applied = await apply({ enabled: false });
+      if (!applied) setEnabled(true);
     },
-    [apply, formPatch, showAlert, status, t],
+    [apply, formIntent, showAlert, status, t],
   );
 
   const handleDisconnect = useCallback(async () => {
@@ -638,26 +751,18 @@ export const DesktopSyncScreen: React.FC = () => {
     }
   }, [showToast, t]);
 
-  const handleYield = useCallback(() => {
-    showAlert(t('yieldTitle'), t('yieldMessage'), [
-      { text: t('common:cancel'), style: 'cancel' },
-      {
-        text: t('yieldConfirm'),
-        onPress: async () => {
-          setBusy(true);
-          try {
-            await engineApiClient.yieldSyncClient();
-            showToast(t('yieldDone'));
-            await refreshStatus();
-          } catch (e: any) {
-            showToast(t('yieldFailed', { message: e?.message ?? String(e) }));
-          } finally {
-            setBusy(false);
-          }
-        },
-      },
-    ]);
-  }, [refreshStatus, showAlert, showToast, t]);
+  /**
+   * NOTE — no authority handover on the phone path (2026-11 client-role
+   * hygiene). The old Actions card exposed "Hand over authority"
+   * (`POST /api/sync/client/yield`). On this device that was always wrong: the
+   * phone runs the CLIENT role, the DESKTOP owns the cognition authority and
+   * its lease, so the app must never ask an engine to hand write authority
+   * over. Right after the two 400s at 18:56:36Z the phone engine started an
+   * authority relay bridge and tried to claim the desktop's lease; the engine
+   * gets its own guard, and the app side is now clean regardless — the action
+   * is gone and every patch goes through the authority-free intent +
+   * `sanitizeClientPatch` choke point.
+   */
 
   /**
    * The auto-join runner (Design A, 2026-10-22): after a successful cloud
@@ -731,6 +836,11 @@ export const DesktopSyncScreen: React.FC = () => {
         group_join_pending: true,
         device_name: deviceName.trim(),
         enabled: true,
+        // Relay transport: clear the LAN-only fields so the merged block the
+        // engine validates cannot be shadowed by a leftover LAN address.
+        peer_address: '',
+        peer_wss_address: '',
+        peer_fingerprint: '',
       });
       if (next) {
         showToast(t('pairingSuccess'));
@@ -1011,6 +1121,7 @@ export const DesktopSyncScreen: React.FC = () => {
       <ScreenHeader title={t('title')} onBack={() => navigation.goBack()} />
 
       <ScrollView
+        testID="desktop-sync-scroll"
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -1523,7 +1634,7 @@ export const DesktopSyncScreen: React.FC = () => {
                 <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
                   {t('transportSection')}
                 </ThemedText>
-                <TransportPicker value={transport} onChange={setTransport} theme={theme} t={t} cloudOnly={storeVariant} />
+                <TransportPicker value={transport} onChange={v => { markDirty(); setTransport(v); }} theme={theme} t={t} cloudOnly={storeVariant} />
                 <ThemedText variant="muted" size={11} style={styles.fieldHint}>
                   {isCloud ? t('transportCloudHint') : t('transportLanHint')}
                 </ThemedText>
@@ -1538,18 +1649,19 @@ export const DesktopSyncScreen: React.FC = () => {
               <Field
                 label={t('peerAddressLabel')}
                 value={peerAddress}
-                onChangeText={setPeerAddress}
+                onChangeText={v => { markDirty(); setPeerAddress(v); }}
                 placeholder="192.168.1.10:28080"
                 hint={t('peerAddressHint')}
                 backgroundColor={inputBg}
                 inputTextColor={textPrimary}
                 inputPlaceholderColor={textMuted}
+                testID="desktop-sync-peer-address"
               />
 
               <Field
                 label={t('peerWssAddressLabel')}
                 value={peerWssAddress}
-                onChangeText={setPeerWssAddress}
+                onChangeText={v => { markDirty(); setPeerWssAddress(v); }}
                 placeholder={t('optionalPlaceholder')}
                 hint={t('peerWssAddressHint')}
                 backgroundColor={inputBg}
@@ -1565,7 +1677,7 @@ export const DesktopSyncScreen: React.FC = () => {
                   label={t('securityModeLabel')}
                   value={securityMode}
                   options={SECURITY_MODES}
-                  onChange={setSecurityMode}
+                  onChange={v => { markDirty(); setSecurityMode(v); }}
                 />
                 {/* Security shield badge (recycled from ConnectionSetupScreen). */}
                 <View style={styles.securityBadge}>
@@ -1584,7 +1696,7 @@ export const DesktopSyncScreen: React.FC = () => {
               <Field
                 label={t('relayUrlLabel')}
                 value={relayUrl}
-                onChangeText={setRelayUrl}
+                onChangeText={v => { markDirty(); setRelayUrl(v); }}
                 placeholder={SYNC_RELAY.defaultRelayUrl}
                 hint={t('relayUrlHint')}
                 backgroundColor={inputBg}
@@ -1839,7 +1951,9 @@ export const DesktopSyncScreen: React.FC = () => {
               </ThemedCard>
             ) : null}
 
-        {/* ── Actions (disconnect / disable / hand over) ────────────────── */}
+        {/* ── Actions (disconnect / disable) ──────────────────────────────
+            No "hand over authority": this app is the desktop's CLIENT (the
+            desktop holds the cognition authority and its lease). */}
             <ThemedCard accentStripe style={styles.card}>
               <View style={styles.cardHeader}>
                 <Icon name="tune-variant" size={18} color={accentPrimary} />
@@ -1866,16 +1980,6 @@ export const DesktopSyncScreen: React.FC = () => {
                 disabled={busy || !status?.enabled}
                 style={styles.actionButton}
                 testID="desktop-sync-disable"
-              />
-
-              <ThemedButton
-                label={t('yieldButton')}
-                icon="crown-outline"
-                variant="outline"
-                onPress={handleYield}
-                disabled={busy || state !== 'syncing'}
-                style={styles.actionButton}
-                testID="desktop-sync-yield"
               />
             </ThemedCard>
           </>

@@ -275,6 +275,15 @@ function authNeededStatus() {
   });
 }
 
+/** A phone that has never paired: sync off, no desktop address. This is the
+ *  state in which pairing happens, so the pairing patch is a real diff. */
+function unpairedStatus() {
+  return status({
+    enabled: false,
+    config: { ...status().config, enabled: false, peer_address: '' },
+  });
+}
+
 async function renderScreen(initial = status()) {
   mockStatus.mockResolvedValue(initial);
   mockKeyStatus.mockResolvedValue({ state: 'uninitialized', has_key: false, rotation_required: false });
@@ -312,7 +321,7 @@ function lanCode(over: Record<string, unknown> = {}): string {
     ws: '192.168.1.10:28080',
     wss: '192.168.1.10:28443',
     mode: 'secure',
-    fingerprint: 'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
+    fingerprint: 'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
     dataset_id: 'ds-1',
     name: 'Studio-PC',
     secret: 's3cr3t-single-use',
@@ -519,21 +528,102 @@ describe('DesktopSyncScreen', () => {
 
   // ── Actions under Advanced ────────────────────────────────────────────────
 
-  it('connects with the form config when the button is pressed', async () => {
+  it('connects with the form config when the button is pressed (one diff PUT)', async () => {
+    // The engine has sync OFF with no endpoint; the user types the desktop
+    // address, so "Save & Connect" is a genuine change → exactly one PUT.
+    const off = status({
+      enabled: false,
+      config: { ...status().config, enabled: false, peer_address: '' },
+    });
     mockUpdate.mockResolvedValue(status());
-    const utils = await renderScreen();
+    const utils = await renderScreen(off);
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent.changeText(utils.getByTestId('desktop-sync-peer-address'), '192.168.1.10:28080');
+    });
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-connect'));
+    });
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabled: true,
+        peer_address: '192.168.1.10:28080',
+      }),
+    );
+    // Unchanged fields are never re-sent (each PUT restarts the client).
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('security_mode');
+  });
+
+  it('pressing connect with an already-live config sends NO PUT (no client restart)', async () => {
+    const live = status();
+    mockUpdate.mockResolvedValue(live);
+    const utils = await renderScreen(live);
     await openAdvanced(utils);
     await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-connect'));
     });
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enabled: true,
-        transport: 'lan',
-        peer_address: '192.168.1.10:28080',
-        security_mode: 'secure',
-      }),
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('a pull-to-refresh with an unchanged config sends NO PUT', async () => {
+    // 16:44:43Z / 18:16:29Z field log: the refresh re-applied the whole form,
+    // and every PUT restarts the engine's sync client.
+    const live = cloudStatus();
+    mockUpdate.mockResolvedValue(live);
+    const utils = await renderScreen(live);
+    await act(async () => {
+      await utils.getByTestId('desktop-sync-scroll').props.refreshControl.props.onRefresh();
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('a pull-to-refresh with a genuine edit sends exactly ONE diff PUT', async () => {
+    const live = cloudStatus();
+    mockUpdate.mockResolvedValue(cloudStatus());
+    const utils = await renderScreen(live);
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent.changeText(utils.getByTestId('desktop-sync-relay-url'), 'wss://new.relay/v1/sync/ws');
+    });
+    await act(async () => {
+      await utils.getByTestId('desktop-sync-scroll').props.refreshControl.props.onRefresh();
+    });
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith({ relay_url: 'wss://new.relay/v1/sync/ws' });
+  });
+
+  it('toggling on an UNPAIRED phone is refused locally — no doomed PUT (the 18:56 400s)', async () => {
+    const unpaired = status({
+      enabled: false,
+      config: { ...status().config, enabled: false, peer_address: '' },
+    });
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen(unpaired);
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent(utils.getByTestId('desktop-sync-enabled-switch'), 'valueChange', true);
+    });
+    // `enabled:true` over `transport:lan` with an empty peer_address is exactly
+    // what the engine rejected with HTTP 400 — it is now never sent.
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'applyInvalid:{"reason":"configError_peer_address_required"}',
     );
+    // The switch did not claim "on".
+    expect(utils.getByTestId('desktop-sync-enabled-switch').props.value).toBe(false);
+  });
+
+  it('toggling on a paired phone sends exactly ONE PUT', async () => {
+    const unpaired = status({ enabled: false, config: { ...status().config, enabled: false } });
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen(unpaired);
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent(utils.getByTestId('desktop-sync-enabled-switch'), 'valueChange', true);
+    });
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
   });
 
   it('disconnects via the disconnect button', async () => {
@@ -546,19 +636,14 @@ describe('DesktopSyncScreen', () => {
     expect(mockDisconnect).toHaveBeenCalled();
   });
 
-  it('confirms before handing over authority and calls yield', async () => {
-    mockYield.mockResolvedValue({ status: 'ok', state: 'syncing' });
-    mockShowAlert.mockImplementation((_t: string, _m: string, buttons: any[]) => {
-      const confirm = buttons?.find(b => b.text === 'yieldConfirm');
-      confirm?.onPress?.();
-    });
+  it('offers NO authority handover on the phone path (client role only)', async () => {
+    // The phone is always the desktop's CLIENT: `POST /api/sync/client/yield`
+    // asks an engine to take write authority, which is desktop-only. The
+    // control is gone (and every patch is authority-free by construction).
     const utils = await renderScreen(status({ state: 'syncing' }));
     await openAdvanced(utils);
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-yield'));
-    });
-    expect(mockShowAlert).toHaveBeenCalled();
-    expect(mockYield).toHaveBeenCalled();
+    expect(utils.queryByTestId('desktop-sync-yield')).toBeNull();
+    expect(mockYield).not.toHaveBeenCalled();
   });
 
   it('warns about pending writes before disabling', async () => {
@@ -703,7 +788,7 @@ describe('DesktopSyncScreen', () => {
   it('pairs from a pasted code: PUTs the relay config with the transient token + unconditional join flag', async () => {
     mockUpdate.mockResolvedValue(cloudStatus());
     mockJoinCloudSync.mockResolvedValue({ action: 'joined' });
-    const utils = await renderScreen();
+    const utils = await renderScreen(unpairedStatus());
     await openAdvanced(utils);
     await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
@@ -772,7 +857,7 @@ describe('DesktopSyncScreen', () => {
   it('auto-joins the sync group after a successful cloud pairing (scan)', async () => {
     mockUpdate.mockResolvedValue(cloudStatus());
     mockJoinCloudSync.mockResolvedValue({ action: 'joined' });
-    const utils = await renderScreen();
+    const utils = await renderScreen(unpairedStatus());
     await scanCode(utils, cloudCodeV3());
     await waitFor(() =>
       expect(mockUpdate).toHaveBeenCalledWith(
@@ -1027,18 +1112,18 @@ describe('DesktopSyncScreen', () => {
 
   it('applies ONE LAN config patch on confirm (addresses + mode + fingerprint + secret)', async () => {
     mockUpdate.mockResolvedValue(status());
-    const utils = await renderScreen();
+    const utils = await renderScreen(unpairedStatus());
     await scanAndMaybeConfirm(utils, lanCode());
     expect(mockUpdate).toHaveBeenCalledTimes(1);
     expect(mockUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        transport: 'lan',
+        // Only the fields that DIFFER from the live config are sent (the
+        // engine restarts the client on any PUT, so a no-op field is churn).
+        // `enabled:true` + the address are the pairing's real changes.
         peer_address: '192.168.1.10:28080',
         peer_wss_address: '192.168.1.10:28443',
-        security_mode: 'secure',
-        peer_fingerprint: 'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
+        peer_fingerprint: 'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
         lan_pairing_secret: 's3cr3t-single-use',
-        device_name: expect.any(String),
         enabled: true,
       }),
     );
@@ -1048,7 +1133,7 @@ describe('DesktopSyncScreen', () => {
 
   it('omits peer_wss_address / peer_fingerprint for an unencrypted LAN payload', async () => {
     mockUpdate.mockResolvedValue(status());
-    const utils = await renderScreen();
+    const utils = await renderScreen(unpairedStatus());
     const { wss, fingerprint, ...rest } = JSON.parse(lanCode());
     await scanAndMaybeConfirm(utils, JSON.stringify({ ...rest, mode: 'unencrypted' }));
     const patch = mockUpdate.mock.calls[0][0];
@@ -1069,7 +1154,9 @@ describe('DesktopSyncScreen', () => {
     await act(async () => {
       fireEvent.press(utils.getByTestId('lan-confirm-button'));
     });
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ lan_pairing_secret: 's3cr3t-single-use' }),
+    );
     expect(AuthService.enrollDevice).toHaveBeenCalledWith({
       grant: 'grant-1',
       deviceId: 'device-abc',
@@ -1085,7 +1172,9 @@ describe('DesktopSyncScreen', () => {
     // The phone is signed in (default mocks) and the profile email
     // user@example.com matches the masked hint u***@example.com.
     await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ lan_pairing_secret: 's3cr3t-single-use' }),
+    );
     expect(AuthService.enrollDevice).not.toHaveBeenCalled();
     expect(mockShowAlert).not.toHaveBeenCalled();
   });
@@ -1099,7 +1188,9 @@ describe('DesktopSyncScreen', () => {
     mockUpdate.mockResolvedValue(status());
     const utils = await renderScreen();
     await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ lan_pairing_secret: 's3cr3t-single-use' }),
+    );
     expect(AuthService.enrollDevice).not.toHaveBeenCalled();
     expect(mockShowAlert).toHaveBeenCalledWith(
       'enrollMismatchTitle',
@@ -1114,7 +1205,9 @@ describe('DesktopSyncScreen', () => {
     mockUpdate.mockResolvedValue(status());
     const utils = await renderScreen();
     await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ lan_pairing_secret: 's3cr3t-single-use' }),
+    );
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('enrollFailed')),
     );

@@ -1995,6 +1995,13 @@ export class EngineApiClient {
    * Hand write authority to the connected peer (`POST /api/sync/client/yield`).
    * Throws an {@link EngineApiError} with status 409 when the client is not
    * connected.
+   *
+   * NOTE (2026-11, client-role hygiene): the embedded phone engine is ALWAYS the
+   * client — the desktop owns the cognition authority and its lease. This
+   * method exists only because it is part of the management contract; the
+   * phone UI must never call it (the Desktop Sync screen's hand-over control
+   * was removed for the same reason). See
+   * `services/sync/syncClientConfigApply` for the authority-free patch policy.
    */
   yieldSyncClient(): Promise<{ status: string; state: SyncClientState }> {
     return this.sendJson<{ status: string; state: SyncClientState }>(
