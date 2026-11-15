@@ -40,6 +40,7 @@ import type {
   MemoriesResponseDto,
   MemoryDto,
   MessagesResponseDto,
+  ProviderAccountDto,
   ProviderCapabilitiesDto,
   ProviderListResponseDto,
   ProviderModelsResponseDto,
