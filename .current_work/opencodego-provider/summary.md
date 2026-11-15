@@ -64,6 +64,15 @@ app phase files consult this repo's `.planning/` mapping where relevant.
 
 ## Implementation Status
 
+> **RELEASED 2026-11-15** — dev channel live: engine sidecar `v0.4.29-dev`
+> ([run 43769227900](https://github.com/harmony-ai-solutions/harmony-link-private/actions/runs/43769227900),
+> both ABIs 200 OK) + app `v0.4.50-dev`
+> ([run 43769837586](https://github.com/harmony-ai-solutions/harmony-ai-app/actions/runs/43769837586),
+> `app/dev/latest.json` verified, APK 99.8 MB, prod channel untouched).
+> Both repos pushed (`engine 767039a`, `app b97f7d7`). Remaining: owner's manual
+> on-device E2E checklist (3-4). Known follow-up: DEV-RELEASE.md's stale
+> `feat/app-engine-parity` branch refs → `main`.
+
 - [x] **Phase 1: Engine provider core** (commits `030af68` `e540e90` `974ac87` `7e572fc` `21e8834` `06a1e64`; 22 files +2189/−11; suite green except pre-existing CRLF cataloggen failure — owned by 2-1)
   - [x] 1-1 Config, models & account type (14th type; no SQL table)
   - [x] 1-2 Provider client (capability shell; header trio; verify matrix)
