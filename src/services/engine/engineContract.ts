@@ -43,7 +43,7 @@
  * against.
  *
  * MUST equal `info.version` in the engine repo's
- * `docs/api/management/openapi.yaml` (today: `1.2.0`). When the engine changes
+ * `docs/api/management/openapi.yaml` (today: `1.12.0`). When the engine changes
  * the app-facing wire surface it bumps its openapi version and this constant is
  * bumped in the same coordinated change; the `engineContractConformance` canary
  * fails if only one side moves.
@@ -135,8 +135,18 @@
  * and both ship together, so no older-engine fallback exists (and the
  * per-entity fan-out is gone from the client). Breaking/MAJOR-shaped surface
  * change, published as a MINOR bump because the app and engine version lockstep.
+ *
+ * 1.10.0 → 1.12.0 (opencodego provider, 2026-11-15): the app now ships with an
+ * engine whose management contract is 1.12.0 — the **OpenCode Go** provider
+ * type (`opencodego`) landed on top of the engine's tier-1 model catalog
+ * release (1.11.0). It is chat-family only: a provider account row carries the
+ * OpenCode Console `api_key` (required) + optional `base_url`, and a module
+ * config's merged provider object carries the OpenAI-style capability overlay
+ * (model + sampling + `n`). No app-facing route or existing shape changed; the
+ * vendored fixtures gain the opencodego account, merged-provider and
+ * models-probe samples so the conformance canary covers them.
  */
-export const ENGINE_CONTRACT_VERSION = '1.10.0';
+export const ENGINE_CONTRACT_VERSION = '1.12.0';
 
 /** Outcome of a contract-version comparison. */
 export interface ContractVersionCheck {

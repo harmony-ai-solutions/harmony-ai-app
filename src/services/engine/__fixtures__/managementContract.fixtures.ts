@@ -58,7 +58,7 @@ import type { LanSyncPairingPayload, SyncPairingPayload } from '../../sync/syncC
  * otherwise (bumping one side without the other is the deliberate-drift canary
  * the plan asks for).
  */
-export const FIXTURE_CONTRACT_VERSION = '1.10.0';
+export const FIXTURE_CONTRACT_VERSION = '1.12.0';
 
 const CREATED = '2026-10-12T09:00:00Z';
 const UPDATED = '2026-10-12T10:00:00Z';
@@ -441,6 +441,23 @@ const moduleConfigListFixture: unknown[] = [moduleConfigFixture];
 
 const moduleConfigCreateFixture = { id: 'mc-1', status: 'module configuration created' };
 
+/**
+ * One OpenCode Go provider account (contract 1.12.0). Same account shape as
+ * every other type: the console key is required, `base_url` empty means the
+ * engine's canonical endpoint (`https://opencode.ai/inference/go/openai/v1`).
+ */
+export const openCodeGoAccountFixture: ProviderAccountDto = {
+  id: 'prov-og',
+  type: 'opencodego',
+  name: 'Go',
+  api_key: 'redacted',
+  base_url: '',
+  extra: '{}',
+  created_at: CREATED,
+  updated_at: UPDATED,
+  deleted_at: null,
+};
+
 const providerListFixture: ProviderListResponseDto = {
   providers: {
     soulbitscloud: [
@@ -456,7 +473,68 @@ const providerListFixture: ProviderListResponseDto = {
         deleted_at: null,
       },
     ],
+    opencodego: [openCodeGoAccountFixture],
   },
+};
+
+/**
+ * A Backend module config wired to the OpenCode Go account: the read is
+ * COMPOSITE — the account half (`id`/`name`/`api_key`/`base_url`) merged with
+ * this config's capability overlay under the `<provider>` key (plan §3.4).
+ */
+export const moduleConfigOpenCodeGoFixture: Record<string, unknown> = {
+  id: 'mc-og',
+  name: 'default',
+  provider: 'opencodego',
+  provider_account_id: 'prov-og',
+  opencodego: {
+    id: 'prov-og',
+    type: 'opencodego',
+    name: 'Go',
+    api_key: 'redacted',
+    base_url: '',
+    model: 'deepseek-v4.1-flash',
+    sampling_preset_name: '',
+    temperature: 0.7,
+    top_p: 1.0,
+    frequency_penalty: 0,
+    presence_penalty: 0,
+    max_completion_tokens: 0,
+    seed: 0,
+    extra_params: '{}',
+  },
+};
+
+/**
+ * `POST /api/providers/models` sample for OpenCode Go (live discovery over
+ * `GET https://opencode.ai/inference/go/v1/models`). Only `id` is mandatory;
+ * the richer fields arrive as the discovery tier provides them.
+ */
+export const providerModelsOpenCodeGoFixture: ProviderModelsResponseDto = {
+  models: [
+    {
+      id: 'deepseek-v4.1-flash',
+      label: 'DeepSeek V4.1 Flash',
+      context: 128000,
+      output_limit: 8192,
+      modalities: ['text'],
+      capabilities: ['chat', 'tools'],
+      param_support: ['temperature', 'max_tokens'],
+      source: 'live',
+      provenance: 'detected',
+      meta: { provider: 'opencodego' },
+    },
+    {
+      id: 'kimi-k2',
+      label: 'Kimi K2',
+      context: 131072,
+      output_limit: 8192,
+      modalities: ['text'],
+      capabilities: ['chat'],
+      source: 'live',
+      provenance: 'detected',
+    },
+  ],
 };
 
 const providerWriteFixture: ProviderWriteResponseDto = {
@@ -625,6 +703,9 @@ export const CONTRACT_FIXTURES: Record<string, unknown> = {
   moduleConfigList: moduleConfigListFixture,
   moduleConfigCreate: moduleConfigCreateFixture,
   providerList: providerListFixture,
+  openCodeGoAccount: openCodeGoAccountFixture,
+  moduleConfigOpenCodeGo: moduleConfigOpenCodeGoFixture,
+  providerModelsOpenCodeGo: providerModelsOpenCodeGoFixture,
   providerWrite: providerWriteFixture,
   providerRefresh: providerRefreshFixture,
   providerVerify: providerVerifyFixture,

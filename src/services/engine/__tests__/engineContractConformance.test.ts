@@ -39,6 +39,9 @@ import {
   entityConfigFixture,
   interactionFixture,
   memoryFixture,
+  moduleConfigOpenCodeGoFixture,
+  openCodeGoAccountFixture,
+  providerModelsOpenCodeGoFixture,
 } from '../__fixtures__/managementContract.fixtures';
 import {
   mapCharacterImageInfo,
@@ -67,8 +70,10 @@ describe('engine contract — version gate', () => {
   it('accepts an equal or newer engine artifact and rejects an older one', () => {
     expect(checkContractVersion(ENGINE_CONTRACT_VERSION).ok).toBe(true);
     expect(checkContractVersion('2.0.0').ok).toBe(true);
-    expect(checkContractVersion('1.8.0').ok).toBe(false);
     expect(checkContractVersion('1.7.0').ok).toBe(false);
+    expect(checkContractVersion('1.8.0').ok).toBe(false);
+    expect(checkContractVersion('1.11.0').ok).toBe(false);
+    expect(checkContractVersion('1.12.0').ok).toBe(true);
     expect(checkContractVersion('1.6.0').ok).toBe(false);
     expect(checkContractVersion('1.5.0').ok).toBe(false);
     expect(checkContractVersion('1.4.0').ok).toBe(false);
@@ -166,6 +171,48 @@ describe('engine contract — mapper conformance against shared fixtures', () =>
     );
     expect(mapped.mime_type).toBe('image/jpeg');
     expect(mapped.image_data).toBe('AQID');
+  });
+});
+
+describe('engine contract — OpenCode Go provider shapes (1.12.0)', () => {
+  it('lists an account-shaped opencodego row with a required key + optional base_url', () => {
+    expect(openCodeGoAccountFixture).toMatchObject({
+      type: 'opencodego',
+      name: 'Go',
+      base_url: '',
+    });
+    expect(openCodeGoAccountFixture.api_key).toBeTruthy();
+    expect(CONTRACT_FIXTURES.providerList).toMatchObject({
+      providers: { opencodego: [openCodeGoAccountFixture] },
+    });
+  });
+
+  it('a module read merges the account half with the capability overlay', () => {
+    expect(moduleConfigOpenCodeGoFixture).toMatchObject({
+      provider: 'opencodego',
+      provider_account_id: 'prov-og',
+    });
+    const merged = moduleConfigOpenCodeGoFixture.opencodego as Record<string, unknown>;
+    // Account half.
+    expect(merged).toMatchObject({ id: 'prov-og', name: 'Go', api_key: 'redacted' });
+    // Capability half.
+    expect(merged).toMatchObject({
+      model: 'deepseek-v4.1-flash',
+      temperature: 0.7,
+      max_completion_tokens: 0,
+    });
+    // No auth-style / fingerprint capability fields (engine-owned headers).
+    expect(merged).not.toHaveProperty('auth');
+    expect(merged).not.toHaveProperty('fingerprint');
+    expect(CONTRACT_FIXTURES.moduleConfigOpenCodeGo).toBe(moduleConfigOpenCodeGoFixture);
+  });
+
+  it('the models probe lists live chat models with no listing error', () => {
+    expect(providerModelsOpenCodeGoFixture.models.map(model => model.id)).toContain(
+      'deepseek-v4.1-flash',
+    );
+    expect(providerModelsOpenCodeGoFixture.error).toBeUndefined();
+    expect(CONTRACT_FIXTURES.providerModelsOpenCodeGo).toBe(providerModelsOpenCodeGoFixture);
   });
 });
 
