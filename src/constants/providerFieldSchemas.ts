@@ -171,7 +171,7 @@ export function withCanonicalCompletionTokens<T extends Record<string, any>>(
 
 /**
  * Capability-only provider field schemas (account fields removed — see the
- * module docblock). Keys match the 13 surviving provider types.
+ * module docblock). Keys match the 14 provider types.
  */
 export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   openai: {
@@ -220,6 +220,30 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
       { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
       { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'response_format', label: 'Response Format', type: 'text', placeholder: 'JSON string or empty', modules: LLM_CHAT_MODULES },
+      { key: 'stop_tokens', label: 'Stop Tokens', type: 'comma-list', modules: LLM_CHAT_MODULES },
+    ],
+  },
+  // OpenCode Go — the OpenCode Go / Go Plus / Go Teams subscription. Chat
+  // capability only (the engine owns the session header + User-Agent; there
+  // are deliberately no auth-style/fingerprint fields here or in the account
+  // schema). Sampling surface mirrors `openaicompatible`.
+  opencodego: {
+    hasModelFetch: false,
+    fields: [
+      { key: 'model', label: 'Model', type: 'text', required: true, catalog: true },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.', modules: LLM_CHAT_MODULES },
+      { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2, placeholder: '0.7', width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1, placeholder: '1.0', width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'top_k', label: 'Top K', type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'top_a', label: 'Top A', type: 'number', step: 0.01, placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'min_p', label: 'Min P', type: 'number', step: 0.01, placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'repetition_penalty', label: 'Repetition Penalty', type: 'number', step: 0.01, placeholder: 'Default', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'frequency_penalty', label: 'Frequency Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'presence_penalty', label: 'Presence Penalty', type: 'number', step: 0.01, min: -2, max: 2, placeholder: '0.0', width: 'half', modules: LLM_CHAT_MODULES },
+      { key: MAX_COMPLETION_TOKENS_KEY, label: MAX_COMPLETION_TOKENS_LABEL, type: 'number', placeholder: 'Default', disabledValue: 0, width: 'half', tooltip: MAX_COMPLETION_TOKENS_TOOLTIP, modules: LLM_CHAT_MODULES },
+      { key: 'seed', label: 'Seed', type: 'number', placeholder: 'Random', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
+      { key: 'n', label: 'N', type: 'number', placeholder: '1 (default)', disabledValue: 0, width: 'half', modules: LLM_CHAT_MODULES },
       { key: 'response_format', label: 'Response Format', type: 'text', placeholder: 'JSON string or empty', modules: LLM_CHAT_MODULES },
       { key: 'stop_tokens', label: 'Stop Tokens', type: 'comma-list', modules: LLM_CHAT_MODULES },
     ],

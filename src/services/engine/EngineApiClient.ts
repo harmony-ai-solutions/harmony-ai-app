@@ -465,7 +465,7 @@ export interface ProviderInUseBodyDto {
 // credential check; `POST /api/providers/models` executes the provider's
 // discovery recipe; `GET /api/providers/capabilities` serves the tier-2 catalog.
 
-/** The verify state taxonomy (SYNTHESIS §1 — held across all 13 providers). */
+/** The verify state taxonomy (SYNTHESIS §1 — held across every provider type). */
 export type ProviderVerifyState =
   | 'valid'
   | 'invalid'

@@ -71,7 +71,7 @@ import {
 
 const log = createLogger('[ProvidersScreen]');
 
-/** Canonical provider-type display order + labels (13 surviving types). */
+/** Canonical provider-type display order + labels (14 provider types). */
 const PROVIDER_TYPE_ORDER: readonly string[] = [
   'openai',
   'anthropic',
@@ -81,6 +81,7 @@ const PROVIDER_TYPE_ORDER: readonly string[] = [
   'openrouter',
   'elevenlabs',
   'openaicompatible',
+  'opencodego',
   'ollama',
   'localai',
   'comfyui',
@@ -97,6 +98,7 @@ const PROVIDER_TYPE_LABELS: Record<string, string> = {
   openrouter: 'OpenRouter',
   elevenlabs: 'ElevenLabs',
   openaicompatible: 'OpenAI Compatible',
+  opencodego: 'OpenCode Go',
   ollama: 'Ollama',
   localai: 'LocalAI',
   comfyui: 'ComfyUI',

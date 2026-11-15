@@ -5,7 +5,11 @@
  * elevenlabs speed (4-6), soulvoice Silero VAD keys (4-11).
  */
 
-import { PROVIDER_SCHEMAS, withCanonicalCompletionTokens } from '../providerFieldSchemas';
+import {
+  PROVIDER_SCHEMAS,
+  getProviderFieldsForModule,
+  withCanonicalCompletionTokens,
+} from '../providerFieldSchemas';
 
 const keys = (type: string): string[] =>
   (PROVIDER_SCHEMAS[type]?.fields ?? []).map(f => f.key);
@@ -90,12 +94,53 @@ describe('providerFieldSchemas — 6-5 capability additions', () => {
   });
 });
 
+describe('providerFieldSchemas — OpenCode Go', () => {
+  it('carries the openaicompatible sampling surface (no auth/fingerprint fields)', () => {
+    expect(keys('opencodego')).toEqual(
+      expect.arrayContaining([
+        'model',
+        'sampling_preset_name',
+        'temperature',
+        'top_p',
+        'top_k',
+        'top_a',
+        'min_p',
+        'repetition_penalty',
+        'frequency_penalty',
+        'presence_penalty',
+        'max_completion_tokens',
+        'seed',
+        'n',
+        'response_format',
+        'stop_tokens',
+      ]),
+    );
+    const capabilityKeys = keys('opencodego');
+    expect(capabilityKeys).not.toContain('auth');
+    expect(capabilityKeys).not.toContain('fingerprint');
+    expect(PROVIDER_SCHEMAS.opencodego.hasModelFetch).toBe(false);
+  });
+
+  it('scopes its sampling fields to the chat-family modules', () => {
+    for (const moduleType of ['backend', 'cognition', 'movement', 'vision']) {
+      const moduleKeys = getProviderFieldsForModule('opencodego', moduleType).map(f => f.key);
+      expect(moduleKeys).toEqual(expect.arrayContaining(['temperature', 'max_completion_tokens']));
+    }
+    for (const moduleType of ['rag', 'tts', 'stt', 'vad', 'imagination']) {
+      const moduleKeys = getProviderFieldsForModule('opencodego', moduleType).map(f => f.key);
+      expect(moduleKeys).not.toContain('temperature');
+      expect(moduleKeys).not.toContain('max_completion_tokens');
+      expect(moduleKeys).not.toContain('sampling_preset_name');
+    }
+  });
+});
+
 describe('providerFieldSchemas — one logical completion-token limit', () => {
   const TOKEN_KEYS = ['max_tokens', 'max_completion_tokens', 'num_predict', 'max_output_tokens'];
   const tokenFields = (type: string) =>
     (PROVIDER_SCHEMAS[type]?.fields ?? []).filter((f) => TOKEN_KEYS.includes(f.key));
 
-  it.each(['openai', 'openaicompatible', 'openrouter', 'localai', 'xai', 'soulbitscloud'])(
+  it.each(['openai', 'openaicompatible', 'opencodego', 'openrouter', 'localai', 'xai', 'soulbitscloud'])(
     '%s exposes ONLY max_completion_tokens, labelled "Max Completion Tokens"',
     (type) => {
       const fields = tokenFields(type);

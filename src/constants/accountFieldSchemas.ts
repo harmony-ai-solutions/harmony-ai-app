@@ -20,11 +20,11 @@
  *
  * §3.1 matrix recap:
  *   api_key required — openai, anthropic, google, xai, mistral, openrouter,
- *     elevenlabs; optional — openaicompatible, ollama, localai, comfyui,
- *     soulvoice; system-managed — soulbitscloud.
+ *     elevenlabs, opencodego; optional — openaicompatible, ollama, localai,
+ *     comfyui, soulvoice; system-managed — soulbitscloud.
  *   base_url required — openaicompatible, ollama, localai, comfyui, soulvoice;
- *     optional — openai, xai, mistral, openrouter, elevenlabs; absent —
- *     anthropic, google; managed — soulbitscloud.
+ *     optional — openai, xai, mistral, openrouter, elevenlabs, opencodego;
+ *     absent — anthropic, google; managed — soulbitscloud.
  */
 
 import type { FieldDefinition, ModuleCapabilityScope } from './providerFieldSchemas';
@@ -130,6 +130,16 @@ export const ACCOUNT_SCHEMAS: Record<string, AccountSchema> = {
         { id: 'bearer', name: 'Bearer' },
         { id: 'basic', name: 'Basic' },
       ], tooltip: 'Left blank, the auth style is fingerprinted at verify time.' },
+    ],
+  },
+  opencodego: {
+    fields: [
+      nameField,
+      { key: 'api_key', label: 'API Key', type: 'password', required: true,
+        tooltip: 'OpenCode Console key (opencode.ai/console → Go).' },
+      { key: 'base_url', label: 'Base URL', type: 'text',
+        placeholder: 'https://opencode.ai/inference/go/openai/v1',
+        tooltip: 'Leave empty for the default OpenCode Go endpoint.' },
     ],
   },
   ollama: {

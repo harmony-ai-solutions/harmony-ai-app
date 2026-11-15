@@ -28,6 +28,7 @@ describe('accountFieldSchemas — §3.1 matrix', () => {
       'mistral',
       'openrouter',
       'elevenlabs',
+      'opencodego',
     ]) {
       expect(validateAccount(type, { name: 'k' }).api_key).toBeTruthy();
     }
@@ -47,7 +48,7 @@ describe('accountFieldSchemas — §3.1 matrix', () => {
   });
 
   it('leaves base_url optional for the cloud/HTTP types that default it', () => {
-    for (const type of ['openai', 'xai', 'mistral', 'openrouter', 'elevenlabs']) {
+    for (const type of ['openai', 'xai', 'mistral', 'openrouter', 'elevenlabs', 'opencodego']) {
       expect(validateAccount(type, { name: 'k', api_key: 'sk' }).base_url).toBeUndefined();
     }
   });
@@ -85,6 +86,10 @@ describe('accountFieldSchemas — extras coverage (audit)', () => {
     expect(keysOf('soulbitscloud')).toContain('auth_mode');
   });
 
+  it('carries no account extras for OpenCode Go (key + endpoint only)', () => {
+    expect(keysOf('opencodego')).toEqual(['name', 'api_key', 'base_url']);
+  });
+
   it('marks the engine-persisted / managed fields read-only', () => {
     const comfyMode = ACCOUNT_SCHEMAS.comfyui.fields.find(f => f.key === 'comfyui_mode');
     expect(comfyMode?.readOnly).toBe(true);
@@ -117,6 +122,32 @@ describe('accountValuesToWriteDto', () => {
     expect(
       accountValuesToWriteDto('ollama', { name: 'local', base_url: 'http://h:11434' }),
     ).toEqual({ name: 'local', api_key: '', base_url: 'http://h:11434' });
+  });
+
+  it('round-trips an OpenCode Go account (name + key + optional base_url)', () => {
+    const account = {
+      name: 'Go',
+      api_key: 'oc-go-key',
+      base_url: 'https://opencode.ai/inference/go/openai/v1',
+      extra: '{}',
+    };
+    const values = accountToFormValues('opencodego', account);
+    expect(values).toEqual({
+      name: 'Go',
+      api_key: 'oc-go-key',
+      base_url: 'https://opencode.ai/inference/go/openai/v1',
+    });
+    expect(accountValuesToWriteDto('opencodego', values)).toEqual({
+      name: 'Go',
+      api_key: 'oc-go-key',
+      base_url: 'https://opencode.ai/inference/go/openai/v1',
+    });
+  });
+
+  it('omits the OpenCode Go base_url when left empty (engine default endpoint)', () => {
+    expect(
+      accountValuesToWriteDto('opencodego', { name: 'Go', api_key: 'oc-go-key', base_url: '' }),
+    ).toEqual({ name: 'Go', api_key: 'oc-go-key' });
   });
 });
 
