@@ -64,20 +64,34 @@ app phase files consult this repo's `.planning/` mapping where relevant.
 
 ## Implementation Status
 
-- [ ] **Phase 1: Engine provider core**
-  - [ ] 1-1 Config, models & account type
-  - [ ] 1-2 Provider client
-  - [ ] 1-3 Session seam
-  - [ ] 1-4 Wiring & validation
-  - [ ] 1-5 Emission & tests
-- [ ] **Phase 2: Catalog & contract**
-  - [ ] 2-1 Catalog Tier-1
-  - [ ] 2-2 Contract bump
-- [ ] **Phase 3: App integration**
-  - [ ] 3-1 Options & defaults
-  - [ ] 3-2 Field schemas
-  - [ ] 3-3 Contract pin
-  - [ ] 3-4 i18n & E2E
+- [x] **Phase 1: Engine provider core** (commits `030af68` `e540e90` `974ac87` `7e572fc` `21e8834` `06a1e64`; 22 files +2189/−11; suite green except pre-existing CRLF cataloggen failure — owned by 2-1)
+  - [x] 1-1 Config, models & account type (14th type; no SQL table)
+  - [x] 1-2 Provider client (capability shell; header trio; verify matrix)
+  - [x] 1-3 Session seam (`SessionAwareProvider`, deterministic ids, 4 modules)
+  - [x] 1-4 Wiring & validation (registry, unions, extract/load, probe tests)
+  - [x] 1-5 Emission & tests (wire table landed in 1-2; 24-assertion suite; UA = `SoulbitsEngine/<AppVersion>` — owner sign-off)
+- [x] **Phase 2: Catalog & contract** (commits `6f9e54d` `836ee91` `767039a`; cataloggen CRLF failure fixed; full engine suite green)
+  - [x] 2-1 Catalog Tier-1 (32 models, chat+modality capability tags, privacy/region labels, wire = openai parity pinned by test)
+  - [x] 2-2 Contract bump (openapi 1.12.0 + Vision module object added; drift CLI green; CHANGELOG Unreleased entry)
+- [x] **Phase 3: App integration** (commits `4404316` `ea47c1a` `8f8a821` `f0e6e22` `c2e0bda`; 2425 tests green, tsc clean; manual on-device E2E pending owner)
+  - [x] 3-1 Options & defaults (shared OPENCODEGO_OPTION, 4 modules; deepseek-v4.1-flash default)
+  - [x] 3-2 Field schemas (+ ProvidersScreen type dispatch — necessary deviation)
+  - [x] 3-3 Contract pin 1.12.0 + fixtures (skipped 1.11.0 — no app-facing surface)
+  - [x] 3-4 i18n (none needed — no precedent for provider account help keys), store-variant test, CHANGELOG; device E2E pending
+
+## Release runbook (pinned versions — verified 2026-11-15)
+
+Live state: app dev channel `v0.4.49-dev` (matches owner's installed app); engine
+dev-loop sidecars publish **with** `-dev` suffix (`engine/v0.4.28-dev/…/libengine.so`
+→ 200, plain → 403 — the DEV-RELEASE.md "plain version" rule applies to the **app**
+dispatch only). The app `build.gradle` fallback `0.4.40` is STALE — always derive
+from live manifests/bucket, never from the gradle default.
+
+- **Engine**: dispatch `build.yml` with `version=v0.4.29-dev`, `android_only=true`
+  → verify `curl -sI https://download.soulbits.app/engine/v0.4.29-dev/{arm64,x86_64}/libengine.so` = 200.
+- **App**: dispatch `build-release.yml` with `version=v0.4.50` (PLAIN — flavour adds
+  `-dev`), `publish_latest=true`, `engine_version=v0.4.29-dev` → verify
+  `app/dev/latest.json` reports `v0.4.50-dev`.
 
 ## Risks & notes
 
