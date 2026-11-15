@@ -36,15 +36,23 @@ reused, while per-use tuning lives on the module config.
   `useProviderCapabilityCatalog` — a failed/unreachable fetch degrades to the
   bundled fallback so the pickers still render.
 
-### The 13 surviving provider types
+### The 14 provider types
 
 Competitor removal (R9, plan §11) deleted three competitor providers entirely
 — clients, configs, sync tables and every app-side trace — leaving **13**
-provider types:
+provider types; **OpenCode Go** (`opencodego`, the OpenCode Go / Go Plus / Go
+Teams subscription) joins as the 14th. Chat-family only — the engine has no
+embeddings or speech client for it, so the provider pickers offer it for
+Backend, Cognition, Movement and Vision only:
 
 `openai`, `anthropic`, `google`, `xai`, `mistral`, `openrouter`,
-`elevenlabs`, `openaicompatible`, `ollama`, `localai`, `comfyui`,
-`soulvoice`, `soulbitscloud`.
+`elevenlabs`, `openaicompatible`, `opencodego`, `ollama`, `localai`,
+`comfyui`, `soulvoice`, `soulbitscloud`.
+
+`opencodego`'s account is a required **OpenCode Console key** plus an optional
+`base_url` (empty = `https://opencode.ai/inference/go/openai/v1`); the stable
+`x-opencode-session` header and the self-identifying User-Agent are
+engine-owned, so the app carries no auth-style/fingerprint fields for it.
 
 `soulbitscloud` is **system-managed**: its account is written automatically
 when you sign in (see *Seeding* below) and is never user-editable
@@ -53,7 +61,7 @@ when you sign in (see *Seeding* below) and is never user-editable
 ## The verify state machine
 
 "Test key" runs `POST /api/providers/verify` — a stateless credential probe —
-and maps the result onto a **6-state** taxonomy held across all 13 providers
+and maps the result onto a **6-state** taxonomy held across every provider type
 (`ProviderVerifyState`). Every verdict is HTTP 200; a non-`valid` state is a
 legitimate result, not a transport error.
 
@@ -83,6 +91,9 @@ provider-specific and owned by the engine:
 - **Soulvoice** fans out per capability.
 - **SoulbitsCloud** returns the gateway catalog with `meta.model_type` /
   `meta.min_tier` (used by seeding's model selection).
+- **OpenCode Go** reads the Go model list (`/inference/go/v1/models` — a
+  different prefix from the chat base); free-tier models answer `403` from
+  non-OpenCode clients and surface as `scope_limited`.
 
 The app wraps this in `src/services/providers/providerModelFetch.ts`, which
 **caches** results keyed by `(type, module, base_url, api-key tail)` so

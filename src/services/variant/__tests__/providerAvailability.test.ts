@@ -55,6 +55,19 @@ describe('providerAvailability (7-14 V3)', () => {
     expect(getAvailableProviders(('tts'))[0].id).toBe('soulbitscloud');
   });
 
+  it('OpenCode Go is full-variant only (store builds collapse to cloud)', () => {
+    setAppVariantForTests('full');
+    expect(getAvailableProviders('backend').some(p => p.id === 'opencodego')).toBe(true);
+    expect(isProviderAvailable('opencodego')).toBe(true);
+
+    setAppVariantForTests('store');
+    expect(isProviderAvailable('opencodego')).toBe(false);
+    for (const moduleType of ['backend', 'cognition', 'movement', 'vision']) {
+      expect(getAvailableProviders(moduleType).some(p => p.id === 'opencodego')).toBe(false);
+      expect(getAvailableProviders(moduleType).map(p => p.id)).toEqual([STORE_PROVIDER_ID]);
+    }
+  });
+
   it('returns [] for an unknown module type', () => {
     setAppVariantForTests('store');
     expect(getAvailableProviders('nope')).toEqual([]);
