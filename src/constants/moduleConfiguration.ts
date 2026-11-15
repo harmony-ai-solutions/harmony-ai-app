@@ -22,6 +22,9 @@ export interface ModuleTypeConfig {
 const MISTRAL_OPTION: ProviderOption = { id: 'mistral', name: 'Mistral', icon: 'weather-windy' };
 const OLLAMA_OPTION: ProviderOption = { id: 'ollama', name: 'Ollama', icon: 'paw' };
 const LOCALAI_OPTION: ProviderOption = { id: 'localai', name: 'LocalAI', icon: 'server-network' };
+// OpenCode Go — the OpenCode Go / Go Plus / Go Teams subscription (chat-family
+// only: no embeddings/speech, so it is never offered for rag/tts/stt/imagination).
+const OPENCODEGO_OPTION: ProviderOption = { id: 'opencodego', name: 'OpenCode Go', icon: 'console-line' };
 
 // ── Per-slot STT provider lists (provider-registry 6-5 step 2, A11, R-AUDIO) ─
 // The transcription and VAD slots no longer share one list. The lists are
@@ -68,6 +71,7 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     MISTRAL_OPTION,
     OLLAMA_OPTION,
     LOCALAI_OPTION,
+    OPENCODEGO_OPTION,
   ], hasGeneralSettings: false, moduleSpecificFields: [] },
   { id: 'cognition', name: 'Cognition', icon: 'lightbulb-outline', description: 'Emotional cognition engine', providerOptions: [
     { id: 'openai', name: 'OpenAI', icon: 'api' },
@@ -80,6 +84,7 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     MISTRAL_OPTION,
     OLLAMA_OPTION,
     LOCALAI_OPTION,
+    OPENCODEGO_OPTION,
   ], hasGeneralSettings: true, moduleSpecificFields: [
     {
       key: 'max_cognition_events',
@@ -107,6 +112,7 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     MISTRAL_OPTION,
     OLLAMA_OPTION,
     LOCALAI_OPTION,
+    OPENCODEGO_OPTION,
   ], hasGeneralSettings: false, moduleSpecificFields: [
     {
       key: 'startup_sync_timeout',
@@ -174,6 +180,7 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     MISTRAL_OPTION,
     OLLAMA_OPTION,
     LOCALAI_OPTION,
+    OPENCODEGO_OPTION,
   ], hasGeneralSettings: false, moduleSpecificFields: [
     {
       key: 'resolution_width',

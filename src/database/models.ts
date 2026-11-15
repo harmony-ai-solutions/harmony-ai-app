@@ -179,6 +179,31 @@ export interface OpenAICompatibleProviderConfig {
   deleted_at: Date | null;
 }
 
+/**
+ * OpenCode Go (`opencodego`) — capability half of the provider overlay for
+ * OpenCode's Go / Go Plus / Go Teams subscription (chat-family modules only).
+ * Wire keys mirror the engine's `ToSyncModel` (snake_case); the account half
+ * (`api_key` / `base_url`) lives on the shared `ProviderAccount`.
+ */
+export interface OpenCodeGoProviderConfig {
+  id: string;
+  name: string;
+  model: string | null;
+  max_tokens: number | null;
+  max_completion_tokens: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  n: number | null;
+  stop_tokens: string | null; // JSON array
+  seed: number | null;
+  response_format: string | null; // JSON string
+  sampling_preset_name: string;
+  extra_params: string; // JSON string e.g. '{"typical_p": 0.95}'
+  deleted_at: Date | null;
+}
+
 export interface SoulvoiceProviderConfig {
   id: string;
   name: string;
@@ -334,7 +359,7 @@ export interface SoulbitsCloudProviderConfig {
  */
 export interface ProviderAccount {
   id: string;
-  /** One of the 13 surviving provider types. */
+  /** One of the 14 provider types. */
   type: string;
   name: string;
   /** Empty string == keyless self-hosted. */
@@ -557,6 +582,7 @@ export type ProviderConfig =
   | OpenAIProviderConfig
   | OpenRouterProviderConfig
   | OpenAICompatibleProviderConfig
+  | OpenCodeGoProviderConfig
   | SoulvoiceProviderConfig
   | ElevenLabsProviderConfig
   | LocalAIProviderConfig

@@ -44,6 +44,28 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
     response_format: '',
     stop_tokens: '',
   },
+  opencodego: {
+    name: '',
+    // Empty == the engine's canonical OpenCode Go endpoint
+    // (https://opencode.ai/inference/go/openai/v1).
+    base_url: '',
+    api_key: '',
+    model: 'deepseek-v4.1-flash',
+    sampling_preset_name: '',
+    extra_params: '{}',
+    temperature: 0.7,
+    top_p: 1.0,
+    top_k: 0,
+    top_a: 0,
+    min_p: 0,
+    repetition_penalty: 0,
+    frequency_penalty: 0,
+    presence_penalty: 0,
+    max_completion_tokens: 0,
+    seed: 0,
+    response_format: '',
+    stop_tokens: '',
+  },
   openrouter: {
     name: '',
     api_key: '',

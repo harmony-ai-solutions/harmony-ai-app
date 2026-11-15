@@ -86,6 +86,35 @@ describe('moduleConfiguration — reactivated providers (6-5)', () => {
   });
 });
 
+describe('moduleConfiguration — OpenCode Go (opencodego)', () => {
+  // OpenCode Go serves chat models only — no embeddings/speech — so it is
+  // offered ONLY by the four chat-family modules.
+  const OPENCODEGO_MODULES = ['backend', 'cognition', 'movement', 'vision'];
+
+  it('lists OpenCode Go in exactly the four chat-family modules', () => {
+    const actualModules = MODULE_TYPES.filter(m =>
+      m.providerOptions.some(p => p.id === 'opencodego'),
+    )
+      .map(m => m.id)
+      .sort();
+    expect(actualModules).toEqual([...OPENCODEGO_MODULES].sort());
+  });
+
+  it('never offers OpenCode Go for rag, tts, stt or imagination', () => {
+    for (const moduleType of ['rag', 'tts', 'stt', 'imagination']) {
+      const module = MODULE_TYPES.find(m => m.id === moduleType);
+      expect(module?.providerOptions.some(p => p.id === 'opencodego')).toBe(false);
+    }
+  });
+
+  it('renders as "OpenCode Go" with a console icon', () => {
+    const option = MODULE_TYPES.find(m => m.id === 'backend')?.providerOptions.find(
+      p => p.id === 'opencodego',
+    );
+    expect(option).toMatchObject({ name: 'OpenCode Go', icon: 'console-line' });
+  });
+});
+
 describe('moduleConfiguration — STT per-slot provider lists (6-5 step 2 / A11 / R-AUDIO)', () => {
   it('transcription offers the five existing clients + soulvoice + ollama + localai', () => {
     expect(STT_SLOT_PROVIDER_OPTIONS.transcription.map(p => p.id)).toEqual([
