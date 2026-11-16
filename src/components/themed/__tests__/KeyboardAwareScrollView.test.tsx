@@ -10,7 +10,7 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { cleanup, render } from '@testing-library/react-native';
-import { KeyboardAwareScrollView } from '../KeyboardAwareScrollView';
+import { KeyboardAwareScrollView, keyboardScrollOverflow } from '../KeyboardAwareScrollView';
 
 let mockKeyboardHeight = 300;
 jest.mock('../../../hooks/useKeyboardHeight', () => ({
@@ -20,6 +20,40 @@ jest.mock('../../../hooks/useKeyboardHeight', () => ({
 afterEach(cleanup);
 
 describe('KeyboardAwareScrollView', () => {
+  describe('keyboardScrollOverflow', () => {
+    it('scrolls by the overflow of the field BOTTOM, not its top edge', () => {
+      // Field top 600, height 48 → bottom 648; keyboard top 500; gap 16.
+      // The old helper scrolled to the top edge and stopped 48+16px short.
+      expect(
+        keyboardScrollOverflow({
+          fieldBottom: 648,
+          keyboardTop: 500,
+          keyboardGap: 16,
+        }),
+      ).toBe(164);
+    });
+
+    it('does not scroll when the field bottom already clears the keyboard', () => {
+      expect(
+        keyboardScrollOverflow({
+          fieldBottom: 480,
+          keyboardTop: 500,
+          keyboardGap: 16,
+        }),
+      ).toBe(0);
+    });
+
+    it('counts the gap as part of the required clearance', () => {
+      expect(
+        keyboardScrollOverflow({
+          fieldBottom: 490,
+          keyboardTop: 500,
+          keyboardGap: 16,
+        }),
+      ).toBe(6);
+    });
+  });
+
   it('adds the keyboard height to the caller bottom padding', async () => {
     mockKeyboardHeight = 300;
     const { getByTestId } = await render(
