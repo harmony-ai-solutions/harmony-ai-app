@@ -118,23 +118,29 @@ The dev-release loop spans two repos.
 
 ### Engine repo — publish the sidecar
 
-1. **Actions → Run workflow** on branch `feat/app-engine-parity`.
-2. Inputs: `android_only=true`, `version=vX.Y.Z`.
-3. Verify the artifact is live:
+1. **Actions → Run workflow** on branch `main` (the sidecar workflow lives in
+   this repo's default branch).
+2. Inputs: `android_only=true`, `version=vX.Y.Z-dev`. Dev-loop sidecars are
+   published **with** the `-dev` suffix (`engine/v0.4.30-dev/…`); the plain
+   `vX.Y.Z` rule below applies to the **app** dispatch only.
+3. Verify the artifact is live (both ABIs):
 
    ```bash
-   curl -sI https://download.soulbits.app/engine/vX.Y.Z/arm64/libengine.so | head -1
+   curl -sI https://download.soulbits.app/engine/vX.Y.Z-dev/arm64/libengine.so | head -1
+   curl -sI https://download.soulbits.app/engine/vX.Y.Z-dev/x86_64/libengine.so | head -1
    # → HTTP/1.1 200 OK
    ```
 
 ### App repo — build + publish the dev APK
 
-1. **Actions → Build Release → Run workflow** on `feat/app-engine-parity`.
+1. **Actions → Build Release → Run workflow** on `main`.
 2. Inputs:
-   - `version=vY.Y.Z` (PLAIN — no `-dev`)
+   - `version=vY.Y.Z` (PLAIN — no `-dev`; the dev flavour appends it)
    - `publish_latest=true` (writes `app/dev/latest.json`)
-   - `engine_version=vX.Y.Z` — or set the `ENGINE_SIDECAR_VERSION` repo variable
-     once and omit this input.
+   - `engine_version=vX.Y.Z-dev` — pass the sidecar version **explicitly**:
+     the `ENGINE_SIDECAR_VERSION` repo variable is only a fallback and can lag
+     the live sidecar. `android/app/build.gradle`'s `VERSION_NAME` default is
+     likewise for local builds only; CI always uses this dispatch input.
 3. The run builds the dev + prod APKs and publishes **only**
    `app/dev/latest.json` (prod is untouched on a dispatch).
 
