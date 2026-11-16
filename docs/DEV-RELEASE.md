@@ -47,6 +47,42 @@ offline launch still knows what it knew before.
 
 ---
 
+## Check the current versions first
+
+Before dispatching, read the **live** versions — never guess from a repo file.
+Both repos' version inputs are free text, and their fallbacks are stale by
+design (see the last row).
+
+| What you need | Authoritative source |
+|---------------|----------------------|
+| Latest app **dev** release | `https://download.soulbits.app/app/dev/latest.json` → `version` (e.g. `v0.4.50-dev`). Dispatch the **next** number **without** the suffix (`v0.4.51`). |
+| Latest app **prod** release | `https://download.soulbits.app/app/prod/latest.json` → `version` (tag runs only; a `403 AccessDenied` means nothing has been published on that channel yet). |
+| Latest engine **dev sidecar** | `s3://soulbits-releases/engine/<version>/<abi>/libengine.so` — list the prefixes with the release AWS credentials, or read the last `android_only=true` engine dispatch. |
+
+```bash
+# App: the channel manifest is written by the release itself, so it is exact.
+curl -s https://download.soulbits.app/app/dev/latest.json | jq -r .version
+
+# Engine: list published versions (needs the release AWS credentials)…
+aws s3 ls s3://soulbits-releases/engine/ | tail -5
+
+# …or, without AWS credentials, read the last dev-loop dispatch's version:
+gh run list -R harmony-ai-solutions/harmony-link-private --workflow=build.yml --limit 5
+gh run view <run-id> --log | grep "INPUTS_VERSION="
+
+# Then confirm the candidate sidecar really exists (both ABIs):
+curl -sI https://download.soulbits.app/engine/v0.4.30-dev/arm64/libengine.so | head -1
+curl -sI https://download.soulbits.app/engine/v0.4.30-dev/x86_64/libengine.so | head -1
+```
+
+> **`engine/latest.json` is not a dev-version source.** Only tag runs — or a
+> dispatch with `ios=true` — write it; the `android_only` dev-loop job publishes
+> the sidecars and deliberately never touches the manifest. Equally, the
+> `ENGINE_SIDECAR_VERSION` repo variable and `android/app/build.gradle`'s
+> `VERSION_NAME` default are fallbacks for convenience, not release state.
+
+---
+
 ## Local dev-release APK
 
 Build a signed dev APK locally that is **signature-consistent with CI** (so a CI

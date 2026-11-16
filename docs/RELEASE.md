@@ -46,7 +46,10 @@ git push origin v1.2.3
 
 - Check the [Releases page](https://github.com/harmony-ai-solutions/harmony-ai-app/releases)
 - Download links should point to versioned S3 paths
-- Latest pointers (`latest/dev`, `latest/prod`) are updated automatically
+- Latest channel pointers are updated automatically:
+  `app/dev/latest.json` and `app/prod/latest.json` (tag runs only). To read the
+  current released versions — including the engine sidecar — see
+  [`DEV-RELEASE.md`](DEV-RELEASE.md#check-the-current-versions-first).
 
 ## Dry-Run a Release
 
