@@ -23,17 +23,20 @@
  *
  * It REUSES the EXISTING connection primitives from
  * EntitySessionService.startInteractionSession — connection creation via
- * ConnectionManager, URL/mode resolution via ConnectionStateManager, and the
- * INIT_ENTITY payload construction — without duplicating them and without
- * touching any live session object.
+ * ConnectionManager, URL/mode resolution via the shared engine-event endpoint
+ * resolver (`resolveEngineEventEndpoint` — embedded / paired / cloud aware),
+ * and the INIT_ENTITY payload construction — without duplicating them and
+ * without touching any live session object.
  */
 
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { v7 as uuidv7 } from 'uuid';
 import ConnectionManager from '../connection/ConnectionManager';
-import ConnectionStateManager from '../ConnectionStateManager';
-import { CLOUD_HOSTS, WS_PATHS } from '../../config/cloud';
+import {
+  EngineConnectionUnavailableError,
+  resolveEngineEventEndpoint,
+} from '../connection/engineEventEndpoint';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[moduleTestSessionService]');
@@ -89,21 +92,24 @@ export interface ModuleTestSession extends ModuleTestSessionHelpers {
   subscribeEvents: (handler: (event: ModuleTestEvent) => void) => () => void;
 }
 
-/** Resolve the engine WebSocket URL + security mode, mirroring startInteractionSession. */
+/**
+ * Resolve the engine WebSocket URL + security mode.
+ *
+ * Delegates to the SHARED embedded-aware resolver (`resolveEngineEventEndpoint`)
+ * so a pure embedded install (no pairing keys) dials the live loopback engine
+ * exactly like chat entity sessions do. An unresolved endpoint is re-thrown as
+ * this service's own error type so the test blocks' existing error handling
+ * (raw message for ModuleTestSessionError) keeps working.
+ */
 async function resolveEngineConnection(): Promise<{ url: string; mode: string }> {
-  const source = await ConnectionStateManager.getCurrentSource();
-  if (source === 'cloud') {
-    return { url: `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`, mode: 'cloud' };
+  try {
+    return await resolveEngineEventEndpoint();
+  } catch (error) {
+    if (error instanceof EngineConnectionUnavailableError) {
+      throw new ModuleTestSessionError(error.message);
+    }
+    throw error;
   }
-  const mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
-  const url =
-    mode === 'unencrypted'
-      ? (await ConnectionStateManager.getWSUrl()) ?? ''
-      : (await ConnectionStateManager.getWSSUrl()) ?? '';
-  if (!url) {
-    throw new ModuleTestSessionError('Not connected to Soulbits Engine');
-  }
-  return { url, mode };
 }
 
 /**

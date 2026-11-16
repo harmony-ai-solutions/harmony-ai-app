@@ -3,11 +3,9 @@ import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
 import { AppLifecycle } from 'react-native-applifecycle';
 import ConnectionManager from './connection/ConnectionManager';
-import ConnectionStateManager from './ConnectionStateManager';
-import { getEngineConnection } from './engine/EngineService';
-import { appendLoopbackToken } from './websocket/loopbackToken';
+import { resolveEngineEventEndpoint } from './connection/engineEventEndpoint';
 import { createLogger } from '../utils/logger';
-import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
+import { CLOUD_HOSTS } from '../config/cloud';
 import { updateConversationMessage } from '../database/repositories';
 import {
   deriveScopeFromParticipants,
@@ -418,36 +416,16 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   /**
-   * Resolve the WS endpoint for a self-hosted (local) session. Prefers the
-   * embedded engine's loopback endpoint (task 3-4 — the engine is the peer) and
-   * falls back to the persisted ConnectionStateManager URL (E2E / legacy).
+   * Resolve the WS endpoint for a session.
+   *
+   * Thin wrapper over the SHARED {@link resolveEngineEventEndpoint}: cloud
+   * proxy, live embedded engine (loopback WS + token, else WSS + insecure-ssl),
+   * or the persisted self-hosted pairing URL — in that order. Chat sessions and
+   * the module-test panel MUST resolve through the same implementation so the
+   * embedded path cannot drift again.
    */
   private async resolveLocalWs(): Promise<{ url: string; mode: string }> {
-    const engine = getEngineConnection();
-    if (engine) {
-      // Embedded engine: prefer the PLAIN loopback WS (ws://) and authenticate
-      // with the per-process loopback token the sidecar publishes in its
-      // readiness payload (the same 7-11 posture SyncConnectionContext uses).
-      // Loopback plaintext + loopback token keeps the self-signed-TLS native
-      // library off the chat-critical socket and avoids the (producerless)
-      // soulbits_jwt demand. Fall back to wss:// only when the sidecar
-      // advertises no plain WS port.
-      if (engine.wsBaseUrl) {
-        return {
-          url: appendLoopbackToken(engine.wsBaseUrl, engine.token),
-          mode: 'unencrypted',
-        };
-      }
-      return {
-        url: appendLoopbackToken(engine.wssBaseUrl, engine.token),
-        mode: 'insecure-ssl',
-      };
-    }
-    const mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
-    const url = mode === 'unencrypted'
-      ? (await ConnectionStateManager.getWSUrl()) ?? ''
-      : (await ConnectionStateManager.getWSSUrl()) ?? '';
-    return { url, mode };
+    return resolveEngineEventEndpoint();
   }
 
   /** Returns connection IDs for all OTHER participants with 'active' status (excluding own entity) */
@@ -778,17 +756,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     connection.status = 'connecting';
 
     try {
-      const source = await ConnectionStateManager.getCurrentSource();
-      let wsUrl: string;
-      let mode: string;
-      if (source === 'cloud') {
-        wsUrl = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
-        mode = 'cloud';
-      } else {
-        const local = await this.resolveLocalWs();
-        mode = local.mode;
-        wsUrl = local.url;
-      }
+      const { url: wsUrl, mode } = await this.resolveLocalWs();
 
       if (!wsUrl) {
         throw new Error('No connection URL available');
@@ -1003,17 +971,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     log.info(`Starting interaction session: ownEntity=${ownEntityId}, participants=[${participantIds.join(', ')}]`);
 
     const deviceId = await DeviceInfo.getUniqueId();
-    const source = await ConnectionStateManager.getCurrentSource();
-    let url: string;
-    let mode: string;
-    if (source === 'cloud') {
-      url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
-      mode = 'cloud';
-    } else {
-      const local = await this.resolveLocalWs();
-      mode = local.mode;
-      url = local.url;
-    }
+    const { url, mode } = await this.resolveLocalWs();
 
     if (!url) {
       throw new Error('No connection URL available');
@@ -2519,17 +2477,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No connection found for ${entityId} during INIT_ENTITY recovery`);
     }
 
-    const source = await ConnectionStateManager.getCurrentSource();
-    let wsUrl: string;
-    let mode: string;
-    if (source === 'cloud') {
-      wsUrl = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
-      mode = 'cloud';
-    } else {
-      const local = await this.resolveLocalWs();
-      mode = local.mode;
-      wsUrl = local.url;
-    }
+    const { url: wsUrl, mode } = await this.resolveLocalWs();
     if (!wsUrl) {
       throw new Error('No connection URL available for INIT_ENTITY recovery');
     }

@@ -52,6 +52,13 @@ jest.mock('../../ConnectionStateManager', () => ({
   },
 }));
 
+// The shared endpoint resolver reads the embedded engine's readiness snapshot.
+// No live engine in this suite → fall through to the persisted (paired) keys.
+jest.mock('../../engine/EngineService', () => ({
+  __esModule: true,
+  getEngineConnection: jest.fn().mockReturnValue(null),
+}));
+
 jest.mock('../../connection/ConnectionManager', () => {
   const { EventEmitter: EE } = require('eventemitter3');
   const cm: any = {
@@ -135,6 +142,7 @@ import ConnectionStateManager from '../../ConnectionStateManager';
 const mockCreateConnection = (ConnectionManager.createConnection as unknown) as jest.Mock;
 const mockSendEvent = (ConnectionManager.sendEvent as unknown) as jest.Mock;
 const mockDisconnect = (ConnectionManager.disconnectConnection as unknown) as jest.Mock;
+const mockEngineService = jest.requireMock('../../engine/EngineService');
 
 function initEvents() {
   // Note the service attaches the socket listener BEFORE sending INIT, so the
@@ -149,6 +157,7 @@ beforeEach(() => {
   mockTtsAudio = 'QUJDRA==';
   mockTtsAudioType = 'audio/mpeg';
   mockSttErrorMessage = null;
+  mockEngineService.getEngineConnection.mockReturnValue(null);
 });
 
 describe('openTestSession — connection + INIT_ENTITY device_type debug', () => {
@@ -184,6 +193,25 @@ describe('openTestSession — connection + INIT_ENTITY device_type debug', () =>
     const [, , url, mode] = mockCreateConnection.mock.calls[0];
     expect(url).toBe('wss://engine.local:28443/events');
     expect(mode).toBe('secure');
+  });
+
+  it('dials the live embedded engine loopback WS on a pure embedded install (no pairing keys)', async () => {
+    // The reported bug: `isPaired: false` embedded installs have EMPTY
+    // soulbits_* pairing keys, yet the engine is up and its loopback
+    // connection is published. The session must dial it (ws + loopback token)
+    // instead of throwing "Not connected to Soulbits Engine".
+    mockEngineService.getEngineConnection.mockReturnValue({
+      wsBaseUrl: 'ws://127.0.0.1:42377',
+      wssBaseUrl: '',
+      token: 'loopback-token',
+    });
+
+    const session = await openTestSession('claire');
+    const [, , url, mode] = mockCreateConnection.mock.calls[0];
+    expect(url).toBe('ws://127.0.0.1:42377?token=loopback-token');
+    expect(mode).toBe('unencrypted');
+
+    await session.disconnect();
   });
 
   it('throws a ModuleTestSessionError when the engine INIT_ENTITY is rejected', async () => {
