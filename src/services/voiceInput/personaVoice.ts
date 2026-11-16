@@ -247,3 +247,64 @@ export async function disablePersonaVoice(configId: string): Promise<void> {
     vad_provider: VOICE_INPUT_DISABLED,
   });
 }
+
+/**
+ * Switch the shared voice-input link to an EXISTING STT config (an explicit
+ * "pick another config" action on the Voice input screen, persona-modules 2-1).
+ *
+ * Full-row write through {@link mappingWithStt}: every other module slot of the
+ * `user` mapping is preserved and the link is always a REAL config id, so the
+ * same LWW guarantees as {@link ensurePersonaVoiceConfig} hold. The previously
+ * linked config is left untouched — switching never mutates (or "breaks") any
+ * config other rows may share.
+ * @throws {PersonaVoiceUnavailableError} when the canonical `user` entity is
+ *         not local yet — never writes a mapping row in that state.
+ */
+export async function linkPersonaVoiceConfig(configId: string): Promise<void> {
+  const entity = await getEntity(PERSONA_VOICE_ENTITY_ID);
+  if (!entity) throw new PersonaVoiceUnavailableError();
+
+  const mapping = await getEntityModuleMapping(PERSONA_VOICE_ENTITY_ID);
+  await createOrUpdateEntityModuleMapping(mappingWithStt(mapping, configId));
+}
+
+/**
+ * Turn voice input OFF without ever damaging a config other rows may share.
+ *
+ * - Linked config IS the dedicated fixed "Persona voice input" row → the
+ *   engine 'disabled' sentinel is written into it in place (the historical OFF
+ *   path; the link keeps pointing at it).
+ * - Link is missing or points at some other config (engine default, a partner
+ *   wiring config…) → that row is NOT mutated; the link moves to the fixed
+ *   config, reused or created directly in its OFF sentinel state.
+ *
+ * @returns the config id now linked (always the fixed config, always real).
+ * @throws {PersonaVoiceUnavailableError} when the canonical `user` entity is
+ *         not local yet.
+ */
+export async function setPersonaVoiceDisabled(): Promise<string> {
+  const entity = await getEntity(PERSONA_VOICE_ENTITY_ID);
+  if (!entity) throw new PersonaVoiceUnavailableError();
+
+  const mapping = await getEntityModuleMapping(PERSONA_VOICE_ENTITY_ID);
+  const linkedId = mapping?.stt_config_id ?? null;
+  if (linkedId) {
+    const linked = await getSTTConfig(linkedId);
+    if (linked && linked.name === PERSONA_VOICE_CONFIG_NAME) {
+      await disablePersonaVoice(linked.id);
+      return linked.id;
+    }
+  }
+
+  // The link is dangling or points at a shared config: (re)use the fixed row.
+  const existingFixed = await getSTTConfigByName(PERSONA_VOICE_CONFIG_NAME);
+  if (existingFixed) {
+    await disablePersonaVoice(existingFixed.id);
+    await createOrUpdateEntityModuleMapping(mappingWithStt(mapping, existingFixed.id));
+    return existingFixed.id;
+  }
+
+  const configId = await createFixedVoiceConfig();
+  await createOrUpdateEntityModuleMapping(mappingWithStt(mapping, configId));
+  return configId;
+}

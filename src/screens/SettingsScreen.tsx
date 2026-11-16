@@ -20,10 +20,7 @@ import {
 } from '../services/engine/EngineService';
 import { engineApiClient } from '../services/engine/EngineApiClient';
 import { needsRelayAuth } from '../services/sync/relayAuthRecovery';
-import {
-  ensurePersonaVoiceConfig,
-  resolvePersonaVoice,
-} from '../services/voiceInput/personaVoice';
+import { resolvePersonaVoice } from '../services/voiceInput/personaVoice';
 import type { PersonaVoiceState } from '../services/voiceInput/personaVoice';
 import { getUserEntities } from '../database/repositories';
 import { createLogger } from '../utils/logger';
@@ -66,7 +63,6 @@ export const SettingsScreen: React.FC = () => {
   // Trailing value chips (READ-only summaries; failures simply omit a chip).
   const [voiceState, setVoiceState] = useState<PersonaVoiceState | null>(null);
   const [personaCount, setPersonaCount] = useState<number | null>(null);
-  const [voiceBusy, setVoiceBusy] = useState(false);
   const [engineVersion, setEngineVersion] = useState<string | null>(
     () => getEngineVersionState().engineVersion,
   );
@@ -189,35 +185,23 @@ export const SettingsScreen: React.FC = () => {
   };
 
   /**
-   * Voice input row — a DIRECT jump into the pinned STT editor. The ensure step
-   * runs first (explicit tap = allowed write): it reuses the linked config when
-   * one exists, repairs a dangling link, or creates the fixed "Persona voice
-   * input" config and links it with a REAL stt_config_id. It never writes a
-   * NULL mapping row, so the engine's LWW wiring cannot be clobbered.
+   * Voice input row — opens the dedicated SELECT screen (switch/create/
+   * disable the linked STT config; "✎ Edit config" there dives into the
+   * pinned editor, with the ensure-repair running on that tap). No direct
+   * jump into the detail editor anymore: switching configs must not require
+   * mutating the fixed one in place.
    */
-  const handleVoiceInputPress = useCallback(async () => {
-    if (voiceBusy) return;
-    setVoiceBusy(true);
-    try {
-      const { configId } = await ensurePersonaVoiceConfig();
-      navigation.navigate('ModuleConfigEdit', { moduleType: 'stt', configId });
-    } catch (err) {
-      log.error('Failed to open voice input config:', err);
-      showToast(t('voiceInputUnavailable'));
-    } finally {
-      setVoiceBusy(false);
-    }
-  }, [voiceBusy, navigation, showToast, t]);
+  const handleVoiceInputPress = useCallback(() => {
+    navigation.navigate('VoiceInput');
+  }, [navigation]);
 
   if (!theme) return null;
 
-  const voiceChip = voiceBusy
-    ? '…'
-    : voiceState
-      ? voiceState.status === 'ok'
-        ? voiceState.modelLabel
-        : t('off')
-      : undefined;
+  const voiceChip = voiceState
+    ? voiceState.status === 'ok'
+      ? voiceState.modelLabel
+      : t('off')
+    : undefined;
   const personaChip = personaCount != null ? String(personaCount) : undefined;
 
   return (

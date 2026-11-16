@@ -2190,6 +2190,17 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   onChange={setSttConfigId}
                   isLoading={hasAnyConfigs === null}
                   entityId={editEntityId ?? undefined}
+                  confirmGate={{
+                    title: t('sttConfirmTitle', {
+                      name: name.trim() || t('sttConfirmPartnerFallback'),
+                    }),
+                    message: t('sttConfirmMessage', {
+                      name: name.trim() || t('sttConfirmPartnerFallback'),
+                    }),
+                    confirmLabel: t('sttConfirmOk'),
+                    cancelLabel: t('common:cancel'),
+                    lockedHint: t('sttLockedHint'),
+                  }}
                 />
 
                 <EntityModuleSelectorWithActions

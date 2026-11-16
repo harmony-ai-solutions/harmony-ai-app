@@ -203,6 +203,7 @@ jest.mock('../../components/entities/EntityModuleSelectorWithActions', () => {
       moduleType,
       configs,
       selectedId,
+      confirmGate,
     }: any) =>
       React.createElement(
         View,
@@ -218,6 +219,9 @@ jest.mock('../../components/entities/EntityModuleSelectorWithActions', () => {
         ),
         selectedId
           ? React.createElement(TouchableOpacity, { testID: `edit-module-config-${moduleType}` })
+          : null,
+        confirmGate
+          ? React.createElement(Text, { testID: `module-gate-${moduleType}` }, confirmGate.title)
           : null,
       ),
   };
@@ -685,6 +689,18 @@ describe('CreateAIScreen — module wiring (4-3)', () => {
     expect(utils.getByTestId('module-selected-backend')).toBeTruthy();
     expect(utils.getByText('selected:b1')).toBeTruthy();
     expect(utils.getByTestId('edit-module-config-backend')).toBeTruthy();
+  });
+
+  it('gates only the partner STT row behind the confirm explainer (4-4)', async () => {
+    const utils = await renderScreen();
+    await flush();
+
+    // The STT slot does NOT drive the user's chat voice input, so it must ask
+    // before it becomes editable; every other module row stays ungated.
+    expect(utils.getByTestId('module-gate-stt')).toBeTruthy();
+    for (const moduleType of ['backend', 'cognition', 'tts', 'rag']) {
+      expect(utils.queryByTestId(`module-gate-${moduleType}`)).toBeNull();
+    }
   });
 
   it('refetches the option lists on focus (back from ModuleConfigEdit)', async () => {

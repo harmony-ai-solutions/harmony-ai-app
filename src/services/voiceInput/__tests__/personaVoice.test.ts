@@ -19,8 +19,10 @@ import {
 import {
   disablePersonaVoice,
   ensurePersonaVoiceConfig,
+  linkPersonaVoiceConfig,
   PersonaVoiceUnavailableError,
   resolvePersonaVoice,
+  setPersonaVoiceDisabled,
 } from '../personaVoice';
 
 jest.mock('../../../utils/logger', () => ({
@@ -252,5 +254,115 @@ describe('disablePersonaVoice — deliberate OFF write', () => {
     await disablePersonaVoice('gone');
 
     expect(mockUpdateSttConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe('linkPersonaVoiceConfig — switch the link, never the row', () => {
+  it('re-links with a REAL id and preserves every other module slot', async () => {
+    mockGetMapping.mockResolvedValue(
+      mapping({ tts_config_id: 'tts-9', rag_config_id: 'rag-2' }),
+    );
+
+    await linkPersonaVoiceConfig('stt-42');
+
+    expect(mockCreateOrUpdateMapping).toHaveBeenCalledTimes(1);
+    const written = mockCreateOrUpdateMapping.mock.calls[0][0];
+    expect(written.entity_id).toBe('user');
+    expect(written.stt_config_id).toBe('stt-42');
+    expect(written.tts_config_id).toBe('tts-9');
+    expect(written.rag_config_id).toBe('rag-2');
+    // The switch is a PURE link write: the previously linked config row is
+    // never mutated, so nothing that still references it can break.
+    expect(mockUpdateSttConfig).not.toHaveBeenCalled();
+    expect(mockCreateSttConfig).not.toHaveBeenCalled();
+  });
+
+  it('refuses to write before the canonical user entity exists', async () => {
+    mockGetEntity.mockResolvedValue(null);
+
+    await expect(linkPersonaVoiceConfig('stt-42')).rejects.toBeInstanceOf(
+      PersonaVoiceUnavailableError,
+    );
+
+    expect(mockCreateOrUpdateMapping).not.toHaveBeenCalled();
+  });
+});
+
+describe('setPersonaVoiceDisabled — OFF without damaging shared configs', () => {
+  it('writes the sentinel in place when the fixed config is the linked one', async () => {
+    mockGetSttConfig.mockResolvedValue(
+      sttConfig({ id: 'stt-1', name: 'Persona voice input' }),
+    );
+
+    await expect(setPersonaVoiceDisabled()).resolves.toBe('stt-1');
+
+    expect(mockUpdateSttConfig).toHaveBeenCalledTimes(1);
+    const updated = mockUpdateSttConfig.mock.calls[0][0];
+    expect(updated.id).toBe('stt-1');
+    expect(updated.transcription_provider).toBe('disabled');
+    expect(updated.vad_provider).toBe('disabled');
+    // Link unchanged — still pointing at the fixed row.
+    expect(mockCreateOrUpdateMapping).not.toHaveBeenCalled();
+    expect(mockCreateSttConfig).not.toHaveBeenCalled();
+  });
+
+  it('never mutates a shared linked config: reuses the fixed row and re-links', async () => {
+    const shared = sttConfig({ id: 'shared-1', name: 'Default STT' });
+    const fixed = sttConfig({
+      id: 'fixed-1',
+      name: 'Persona voice input',
+      transcription_provider: 'elevenlabs',
+      vad_provider: 'silero',
+    });
+    mockGetSttConfig.mockImplementation(async (id: string) =>
+      id === 'shared-1' ? shared : id === 'fixed-1' ? fixed : null,
+    );
+    mockGetSttConfigByName.mockResolvedValue(fixed);
+
+    await expect(setPersonaVoiceDisabled()).resolves.toBe('fixed-1');
+
+    // ONLY the fixed row receives the sentinel; the shared row is untouched.
+    expect(mockUpdateSttConfig).toHaveBeenCalledTimes(1);
+    expect(mockUpdateSttConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fixed-1' }),
+    );
+    expect(mockCreateOrUpdateMapping).toHaveBeenCalledTimes(1);
+    expect(mockCreateOrUpdateMapping).toHaveBeenCalledWith(
+      expect.objectContaining({ stt_config_id: 'fixed-1' }),
+    );
+    expect(mockCreateSttConfig).not.toHaveBeenCalled();
+  });
+
+  it('creates the fixed row in its OFF state when none exists', async () => {
+    mockGetMapping.mockResolvedValue(null);
+    mockGetSttConfigByName.mockResolvedValue(null);
+    mockCreateSttConfig.mockResolvedValue('fixed-new');
+
+    await expect(setPersonaVoiceDisabled()).resolves.toBe('fixed-new');
+
+    expect(mockCreateSttConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Persona voice input',
+        transcription_provider: 'disabled',
+        vad_provider: 'disabled',
+      }),
+    );
+    // createFixedVoiceConfig already writes the OFF sentinel — no second write.
+    expect(mockUpdateSttConfig).not.toHaveBeenCalled();
+    expect(mockCreateOrUpdateMapping).toHaveBeenCalledWith(
+      expect.objectContaining({ stt_config_id: 'fixed-new' }),
+    );
+  });
+
+  it('refuses to write before the canonical user entity exists', async () => {
+    mockGetEntity.mockResolvedValue(null);
+
+    await expect(setPersonaVoiceDisabled()).rejects.toBeInstanceOf(
+      PersonaVoiceUnavailableError,
+    );
+
+    expect(mockCreateOrUpdateMapping).not.toHaveBeenCalled();
+    expect(mockUpdateSttConfig).not.toHaveBeenCalled();
+    expect(mockCreateSttConfig).not.toHaveBeenCalled();
   });
 });

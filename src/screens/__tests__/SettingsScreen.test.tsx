@@ -7,8 +7,8 @@
  *    multi-row cards do;
  *  - trailing value chips (voice model, persona count, desktop authority,
  *    engine version);
- *  - navigation: Personas → PersonaList, Voice input → the pinned STT editor
- *    only AFTER the deliberate ensure-link helper resolves;
+ *  - navigation: Personas → PersonaList, Voice input → the dedicated
+ *    VoiceInput select screen (switch/edit split, no direct editor jump);
  *  - the pre-existing push-notification authorization wiring.
  */
 
@@ -325,28 +325,15 @@ describe('SettingsScreen — navigation', () => {
     expect(mockNavigate).toHaveBeenCalledWith('PersonaList');
   });
 
-  it('Voice input ensures the fixed config, then opens the pinned STT editor', async () => {
+  it('Voice input opens the dedicated select screen (no direct editor jump)', async () => {
     const utils = await renderScreen();
 
     fireEvent.press(utils.getByTestId('link-voiceInput'));
 
-    await waitFor(() =>
-      expect(mockNavigate).toHaveBeenCalledWith('ModuleConfigEdit', {
-        moduleType: 'stt',
-        configId: 'stt-1',
-      }),
-    );
-    expect(mockEnsureVoice).toHaveBeenCalledTimes(1);
-  });
-
-  it('surfaces the engine-unavailable hint and does not navigate when ensure fails', async () => {
-    mockEnsureVoice.mockRejectedValue(new Error('no user entity'));
-
-    const utils = await renderScreen();
-
-    fireEvent.press(utils.getByTestId('link-voiceInput'));
-
-    await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('voiceInputUnavailable'));
+    expect(mockNavigate).toHaveBeenCalledWith('VoiceInput');
+    // The ensure-link write moved INTO the select screen's Edit action — the
+    // Settings row itself must stay a pure navigation step.
+    expect(mockEnsureVoice).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalledWith('ModuleConfigEdit', expect.anything());
   });
 });

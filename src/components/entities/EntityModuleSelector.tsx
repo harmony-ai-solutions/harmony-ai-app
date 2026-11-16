@@ -99,6 +99,13 @@ interface EntityModuleSelectorProps {
   hideLabel?: boolean;
   /** When provided, renders a "Create new config…" row at the bottom of the sheet. */
   onCreateNew?: () => void;
+  /**
+   * Gated mode (e.g. the partner STT slot): the selector renders muted with a
+   * lock instead of the chevron and never opens the sheet. Tapping calls
+   * `onLockedPress` — the parent runs its confirm dialog and lifts the lock.
+   */
+  locked?: boolean;
+  onLockedPress?: () => void;
 }
 
 export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
@@ -109,6 +116,8 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
   isLoading = false,
   hideLabel = false,
   onCreateNew,
+  locked = false,
+  onLockedPress,
 }) => {
   const { theme } = useAppTheme();
   const [modalVisible, setModalVisible] = useState(false);
@@ -148,15 +157,20 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
           styles.selector,
           {
             backgroundColor: 'rgba(15, 23, 42, 0.9)',
-            borderColor: isDisabled
-              ? theme.colors.border.default
-              : 'rgba(236, 72, 153, 0.5)',
+            borderColor:
+              locked || isDisabled
+                ? theme.colors.border.default
+                : 'rgba(236, 72, 153, 0.5)',
             opacity: isLoading ? 0.5 : 1,
           },
         ]}
         onPress={() => {
           if (isLoading) return;
           hapticLightPress();
+          if (locked) {
+            onLockedPress?.();
+            return;
+          }
           setModalVisible(true);
         }}
         activeOpacity={0.7}
@@ -165,10 +179,10 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
         <View style={styles.selectorTextGroup}>
           <ThemedText
             size={13.5}
-            weight={isDisabled ? 'normal' : 'medium'}
-            variant={isDisabled ? 'muted' : 'primary'}
+            weight={locked || isDisabled ? 'normal' : 'medium'}
+            variant={locked || isDisabled ? 'secondary' : 'primary'}
             numberOfLines={1}
-            style={isDisabled ? undefined : styles.selectorName}
+            style={locked || isDisabled ? undefined : styles.selectorName}
           >
             {selectedLabel}
           </ThemedText>
@@ -183,19 +197,28 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
             </ThemedText>
           ) : null}
         </View>
-        <ThemedText
-          size={12}
-          style={[
-            styles.selectorChevron,
-            {
-              color: isDisabled
-                ? theme.colors.text.muted
-                : theme.colors.accent.primary,
-            },
-          ]}
-        >
-          ▾
-        </ThemedText>
+        {locked ? (
+          <Icon
+            name="lock-outline"
+            size={14}
+            color={theme.colors.text.muted}
+            testID="module-selector-lock"
+          />
+        ) : (
+          <ThemedText
+            size={12}
+            style={[
+              styles.selectorChevron,
+              {
+                color: isDisabled
+                  ? theme.colors.text.muted
+                  : theme.colors.accent.primary,
+              },
+            ]}
+          >
+            ▾
+          </ThemedText>
+        )}
       </TouchableOpacity>
 
       {/* ── Popup modal ── */}

@@ -1,26 +1,29 @@
 /**
- * EntityModuleSelectorWithActions — entity-context threading (persona-modules
- * 5-1).
+ * EntityModuleSelectorWithActions — the partner-STT confirm gate (4-4).
  *
- * Verifies that when an `entityId` prop is provided (edit-mode CreateAI) it is
- * threaded into the ModuleConfigEdit navigation params for BOTH the edit action
- * and the "Create new config…" sheet action; and that it is OMITTED when no
- * entity context exists (create mode). The child EntityModuleSelector + theme +
- * navigation are mocked; the component under test is real.
+ * The partner's STT slot does NOT drive the user's chat voice input (the
+ * global user config in Settings › Voice input does), so a gated row must:
+ *  - render LOCKED by default: no "✎ Edit config", muted selector, hint;
+ *  - open the explainer modal on tap, and stay locked on Cancel;
+ *  - become a normal editable row (edit link back, selector ungated) only
+ *    after the explicit confirm — for this screen visit, nothing persisted.
+ * Rows without a gate keep the old behavior.
+ *
+ * NOTE on `fireEvent`: in @testing-library/react-native v14 `fireEvent.press`
+ * is ASYNC and wraps the handler in `act`. Every press MUST be awaited —
+ * a floating press promise leaves React's act scope un-flushed, which poisons
+ * every later render in the same file.
  */
 
 import React from 'react';
-import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
+import { cleanup, fireEvent, render } from '@testing-library/react-native';
 import { EntityModuleSelectorWithActions } from '../EntityModuleSelectorWithActions';
 
 afterEach(cleanup);
-beforeEach(cleanup);
 
-jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return ({ name, ...props }: any) => React.createElement(Text, { ...props }, name);
-});
+jest.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
 
 jest.mock('../../../contexts/ThemeContext', () => ({
   useAppTheme: () => ({
@@ -31,92 +34,151 @@ jest.mock('../../../contexts/ThemeContext', () => ({
         border: { default: '#333333' },
         text: { primary: '#ffffff', secondary: '#cccccc', muted: '#aaaaaa', disabled: '#555555' },
         status: { success: '#22c55e', warning: '#f59e0b', error: '#ef4444' },
+        typography: { headerOpacity: 1, subtextOpacity: 0.7, captionOpacity: 0.5 },
       },
     },
   }),
 }));
 
-jest.mock('../../themed/ThemedText', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return { __esModule: true, ThemedText: ({ children, style, ...props }: any) =>
-    React.createElement(Text, { style, ...props }, children) };
-});
-
-jest.mock('../../../utils/haptics', () => ({ hapticLightPress: jest.fn() }));
+jest.mock('../../../utils/haptics', () => ({
+  setHapticFeedbackEnabled: jest.fn(),
+  hapticLightPress: jest.fn(),
+}));
 
 const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: mockNavigate }),
+  useNavigation: () => ({ navigate: mockNavigate, goBack: jest.fn() }),
 }));
 
-// Child selector — render a button that triggers the "Create new config…" row
-// via the injected onCreateNew, and a status line for the selected id.
+// The inner selector is covered by its own tests; expose the lock state and a
+// tap target so the GATE wiring (this component) is what's under test.
 jest.mock('../EntityModuleSelector', () => {
   const React = require('react');
-  const { View, Text, TouchableOpacity } = require('react-native');
+  const { Text, TouchableOpacity } = require('react-native');
   return {
     __esModule: true,
-    EntityModuleSelector: ({ label, selectedId, onCreateNew }: any) =>
-      React.createElement(View, null,
-        React.createElement(Text, null, `selected:${selectedId}`),
-        React.createElement(TouchableOpacity, {
-          testID: 'create-new-config',
-          onPress: () => onCreateNew?.(),
-          accessibilityRole: 'button',
-        }, React.createElement(Text, null, 'create-new')),
+    EntityModuleSelector: ({
+      locked,
+      onLockedPress,
+      onChange,
+      onCreateNew,
+    }: any) =>
+      React.createElement(
+        TouchableOpacity,
+        {
+          testID: 'ems',
+          onPress: () => (locked ? onLockedPress?.() : onChange?.('c2')),
+        },
+        React.createElement(Text, { testID: 'ems-locked' }, `locked:${Boolean(locked)}`),
+        onCreateNew
+          ? React.createElement(Text, { testID: 'ems-create' })
+          : null,
       ),
   };
 });
 
+const configs = [
+  { id: 'c1', name: 'Persona voice input', subtitle: 'ElevenLabs + VAD: Silero' },
+  { id: 'c2', name: 'FasterWhisper Local' },
+];
+
+const gate = {
+  title: "Change Nova's STT config?",
+  message:
+    "When you chat, your speech is transcribed with the global user Voice input config (Settings › Voice input) — not this one. Nova's STT wiring only handles audio received by Nova directly, e.g. via Game Plugin.",
+  confirmLabel: 'Change anyway',
+  cancelLabel: 'Cancel',
+  lockedHint: 'Your chat voice input is set in Settings › Voice input.',
+};
+
 const baseProps = {
-  label: 'AI model',
-  moduleType: 'backend',
-  configs: [{ id: 'cfg-1', name: 'GPT-4' }],
-  selectedId: 'cfg-1',
+  label: 'Speech-to-Text (STT)',
+  moduleType: 'stt',
+  configs,
+  selectedId: 'c1',
   onChange: jest.fn(),
 };
 
-describe('EntityModuleSelectorWithActions — entityId threading', () => {
-  it('threads entityId into the edit-action navigation params when present', async () => {
-    const utils = await render(<EntityModuleSelectorWithActions {...baseProps} entityId="ai-entity-1" />);
-    await act(async () => {});
+beforeEach(() => {
+  mockNavigate.mockClear();
+});
 
-    // Edit pencil (only rendered when a config is selected).
-    await fireEvent.press(utils.getByLabelText('Edit AI model configuration'));
-    await act(async () => {});
+describe('confirmGate — locked until explicitly confirmed', () => {
+  it('renders locked by default: no edit link, muted selector, hint', async () => {
+    const { getByTestId, queryByTestId, getByText } = await render(
+      <EntityModuleSelectorWithActions {...baseProps} confirmGate={gate} />,
+    );
 
-    expect(mockNavigate).toHaveBeenCalledWith('ModuleConfigEdit', {
-      moduleType: 'backend',
-      configId: 'cfg-1',
-      entityId: 'ai-entity-1',
-    });
+    expect(getByTestId('ems-locked').props.children).toBe('locked:true');
+    expect(queryByTestId('edit-module-config-stt')).toBeNull();
+    expect(getByText(gate.lockedHint as string)).toBeTruthy();
   });
 
-  it('threads entityId into the create-action navigation params when present', async () => {
-    const utils = await render(<EntityModuleSelectorWithActions {...baseProps} entityId="ai-entity-1" />);
-    await act(async () => {});
+  it('stays locked when the explainer is cancelled', async () => {
+    const { getByTestId, queryByTestId, queryByText } = await render(
+      <EntityModuleSelectorWithActions {...baseProps} confirmGate={gate} />,
+    );
 
-    // "Create new config…" row inside the child selector sheet.
-    await fireEvent.press(utils.getByTestId('create-new-config'));
-    await act(async () => {});
+    await fireEvent.press(getByTestId('ems'));
+    expect(queryByText(gate.title)).toBeTruthy();
 
-    expect(mockNavigate).toHaveBeenCalledWith('ModuleConfigEdit', {
-      moduleType: 'backend',
-      entityId: 'ai-entity-1',
-    });
+    await fireEvent.press(getByTestId('gate-cancel-stt'));
+
+    expect(getByTestId('ems-locked').props.children).toBe('locked:true');
+    expect(queryByTestId('edit-module-config-stt')).toBeNull();
+    expect(queryByText(gate.lockedHint as string)).toBeTruthy();
+    expect(queryByText(gate.title)).toBeNull();
   });
 
-  it('omits entityId from navigation params when no entity context exists (create mode)', async () => {
-    const utils = await render(<EntityModuleSelectorWithActions {...baseProps} />);
-    await act(async () => {});
+  it('unlocks on confirm: edit link back, selector ungated, hint gone', async () => {
+    const { getByTestId, queryByText } = await render(
+      <EntityModuleSelectorWithActions {...baseProps} confirmGate={gate} />,
+    );
 
-    await fireEvent.press(utils.getByLabelText('Edit AI model configuration'));
-    await act(async () => {});
+    await fireEvent.press(getByTestId('ems'));
+    await fireEvent.press(getByTestId('gate-confirm-stt'));
+
+    expect(getByTestId('ems-locked').props.children).toBe('locked:false');
+    expect(getByTestId('edit-module-config-stt')).toBeTruthy();
+    expect(queryByText(gate.lockedHint as string)).toBeNull();
+    expect(queryByText(gate.title)).toBeNull();
+  });
+
+  it('keeps the modal copy verbatim (the owner-specified wording)', async () => {
+    const { getByTestId, getByText } = await render(
+      <EntityModuleSelectorWithActions {...baseProps} confirmGate={gate} />,
+    );
+
+    await fireEvent.press(getByTestId('ems'));
+
+    expect(getByText(gate.title)).toBeTruthy();
+    expect(getByText(gate.message)).toBeTruthy();
+    expect(getByText(gate.confirmLabel)).toBeTruthy();
+    expect(getByText(gate.cancelLabel)).toBeTruthy();
+  });
+});
+
+describe('ungated rows — unchanged behavior', () => {
+  it('shows the edit link immediately when a config is selected', async () => {
+    const { getByTestId, queryByText } = await render(
+      <EntityModuleSelectorWithActions {...baseProps} />,
+    );
+
+    expect(getByTestId('ems-locked').props.children).toBe('locked:false');
+    expect(getByTestId('edit-module-config-stt')).toBeTruthy();
+    expect(queryByText(gate.lockedHint as string)).toBeNull();
+  });
+
+  it('navigates to the detail editor from the edit link', async () => {
+    const { getByTestId } = await render(
+      <EntityModuleSelectorWithActions {...baseProps} />,
+    );
+
+    await fireEvent.press(getByTestId('edit-module-config-stt'));
 
     expect(mockNavigate).toHaveBeenCalledWith('ModuleConfigEdit', {
-      moduleType: 'backend',
-      configId: 'cfg-1',
+      moduleType: 'stt',
+      configId: 'c1',
     });
   });
 });

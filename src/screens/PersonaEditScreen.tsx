@@ -98,7 +98,6 @@ import {
 } from '../database/repositories';
 import type { UserPersonaAvatar, UserPersonaProfileFields } from '../database/repositories';
 import ChatPreferencesService from '../services/ChatPreferencesService';
-import { ensurePersonaVoiceConfig } from '../services/voiceInput/personaVoice';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
 
@@ -984,16 +983,11 @@ export const PersonaEditScreen: React.FC = () => {
   }, [isEdit, isBuiltIn, isActivePersona, personaId, navigation, showAlert, t]);
 
   // ── Shared voice input (all personas) ──────────────────────────────────
-  /** Direct jump to the pinned STT editor; ensure-link runs on this tap only. */
-  const handleManageVoiceInput = useCallback(async () => {
-    try {
-      const { configId } = await ensurePersonaVoiceConfig();
-      navigation.navigate('ModuleConfigEdit', { moduleType: 'stt', configId });
-    } catch (err) {
-      log.error('Failed to open voice input config:', err);
-      showAlert(t('common:error'), t('settings:voiceInputUnavailable'));
-    }
-  }, [navigation, showAlert, t]);
+  /** Opens the shared voice-input SELECT screen (switch/create/disable the
+   *  linked STT config; the detail editor is one more tap from there). */
+  const handleManageVoiceInput = useCallback(() => {
+    navigation.navigate('VoiceInput');
+  }, [navigation]);
 
   if (!theme || !loaded) return null;
 

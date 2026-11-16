@@ -28,6 +28,7 @@ import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen
 import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
 import { ProvidersScreen } from '../screens/settings/ProvidersScreen';
 import { PersonaListScreen } from '../screens/settings/PersonaListScreen';
+import { VoiceInputScreen } from '../screens/settings/VoiceInputScreen';
 import { DesktopSyncScreen } from '../screens/settings/DesktopSyncScreen';
 import { BackupSettingsScreen } from '../screens/settings/BackupSettingsScreen';
 import { RestoreOnboardingScreen } from '../screens/setup/RestoreOnboardingScreen';
@@ -134,6 +135,10 @@ export type RootStackParamList = {
   AppearanceSettings: undefined;
   /** Personas — the Settings-tab dedicated persona list (set active / edit). */
   PersonaList: undefined;
+  /** Voice input — the shared per-user STT config selector (Settings › Voice
+   *  input): switch/create/disable the linked config, then dive into the
+   *  ModuleConfigEdit detail editor. */
+  VoiceInput: undefined;
   /** Providers — the shared provider-account management surface (6-2). */
   Providers: undefined;
   /** Desktop sync — the changeset-v1 desktop↔phone sync config + status
@@ -256,6 +261,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
           <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
           <Stack.Screen name="PersonaList" component={PersonaListScreen} />
+          <Stack.Screen name="VoiceInput" component={VoiceInputScreen} />
           <Stack.Screen name="Providers" component={ProvidersScreen} />
           <Stack.Screen name="DesktopSync" component={DesktopSyncScreen} />
           <Stack.Screen name="BackupSettings" component={BackupSettingsScreen} />
