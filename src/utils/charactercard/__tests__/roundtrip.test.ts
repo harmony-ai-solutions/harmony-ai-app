@@ -127,6 +127,10 @@ describe('V3 round-trip fidelity (4-4)', () => {
   });
 
   it('preserves provenance: source + creation_date unchanged; modification_date bumped', () => {
+    // Capture the clock BEFORE the round-trip: the exporter stamps its own
+    // `now()` during the run, so comparing against a timestamp taken after it
+    // fails whenever the export crosses a second boundary.
+    const before = now();
     const { parsed, reparsedJson, exported } = roundTrip();
 
     expect(reparsedJson.data.source).toEqual(parsed.data.source);
@@ -142,7 +146,7 @@ describe('V3 round-trip fidelity (4-4)', () => {
     expect(reparsedJson.data.modification_date as number).toBeGreaterThan(
       originalMod,
     );
-    expect(reparsedJson.data.modification_date as number).toBeGreaterThanOrEqual(now());
+    expect(reparsedJson.data.modification_date as number).toBeGreaterThanOrEqual(before);
   });
 
   it('re-parses the exported PNG to the identical card (modification_date preserved)', () => {
