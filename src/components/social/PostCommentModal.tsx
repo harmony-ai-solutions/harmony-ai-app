@@ -18,7 +18,6 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Keyboard,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +25,7 @@ import { useTranslation } from 'react-i18next';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { useInModalToast } from '../modals/InModalToast';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
@@ -73,23 +73,9 @@ export const PostCommentModal: React.FC<PostCommentModalProps> = ({
   // Dismiss the inline action menu (tap anywhere / scroll).
   const closeActions = useCallback(() => setActionCommentId(null), []);
   // Height of the soft keyboard (0 when hidden) — keeps the composer visible
-  // without double-compensating via KeyboardAvoidingView.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-
-  // ── Keyboard inset (edge-to-edge Android: adjustResize doesn't fire) ──
-  useEffect(() => {
-    const onShow = (e: any) => {
-      setKeyboardHeight(e?.endCoordinates?.height ?? 300);
-    };
-    const onHide = () => setKeyboardHeight(0);
-    const subs = [
-      Keyboard.addListener('keyboardWillShow', onShow),
-      Keyboard.addListener('keyboardDidShow', onShow),
-      Keyboard.addListener('keyboardWillHide', onHide),
-      Keyboard.addListener('keyboardDidHide', onHide),
-    ];
-    return () => subs.forEach(s => s.remove());
-  }, []);
+  // without double-compensating via KeyboardAvoidingView. Android edge-to-edge:
+  // adjustResize doesn't fire, so the inset comes from the events.
+  const keyboardHeight = useKeyboardHeight();
 
   const load = useCallback(async () => {
     if (!postId) return;

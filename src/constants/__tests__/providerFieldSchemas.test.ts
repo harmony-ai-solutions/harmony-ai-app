@@ -8,6 +8,7 @@
 import {
   PROVIDER_SCHEMAS,
   getProviderFieldsForModule,
+  getProviderModelFieldKey,
   withCanonicalCompletionTokens,
 } from '../providerFieldSchemas';
 
@@ -212,5 +213,44 @@ describe('withCanonicalCompletionTokens', () => {
     expect(withCanonicalCompletionTokens('openai', 'tts', { max_tokens: 512 })).toEqual({
       max_tokens: 512,
     });
+  });
+});
+
+describe('ElevenLabs model keys — the engine’s own capability keys', () => {
+  it('TTS selects its model under `model_id` (no `model` alias)', () => {
+    const ttsKeys = getProviderFieldsForModule('elevenlabs', 'tts').map((f) => f.key);
+    expect(ttsKeys).toContain('model_id');
+    expect(ttsKeys).not.toContain('model');
+    expect(ttsKeys).not.toContain('stt_model_id');
+    expect(field('elevenlabs', 'model_id')).toMatchObject({ catalog: true, label: 'Model' });
+  });
+
+  it('STT selects its model under `stt_model_id` (catalog-backed Scribe list)', () => {
+    const sttKeys = getProviderFieldsForModule('elevenlabs', 'stt').map((f) => f.key);
+    expect(sttKeys).toContain('stt_model_id');
+    expect(sttKeys).not.toContain('model');
+    expect(sttKeys).not.toContain('model_id');
+    expect(field('elevenlabs', 'stt_model_id')).toMatchObject({ catalog: true, label: 'Model' });
+  });
+
+  it('voice settings stay TTS-only', () => {
+    const sttKeys = getProviderFieldsForModule('elevenlabs', 'stt').map((f) => f.key);
+    expect(sttKeys).not.toContain('voice_id');
+    expect(sttKeys).not.toContain('stability');
+    expect(sttKeys).not.toContain('similarity_boost');
+  });
+});
+
+describe('getProviderModelFieldKey — the model key is not always `model`', () => {
+  it('resolves the engine-specific keys', () => {
+    expect(getProviderModelFieldKey('elevenlabs', 'tts')).toBe('model_id');
+    expect(getProviderModelFieldKey('elevenlabs', 'stt')).toBe('stt_model_id');
+    expect(getProviderModelFieldKey('xai', 'imagination')).toBe('image_model');
+  });
+
+  it('falls back to `model` for the providers that use it', () => {
+    expect(getProviderModelFieldKey('openai', 'backend')).toBe('model');
+    expect(getProviderModelFieldKey('anthropic', 'backend')).toBe('model');
+    expect(getProviderModelFieldKey('xai', 'backend')).toBe('model');
   });
 });

@@ -28,7 +28,11 @@
  */
 
 import type { FieldDefinition, ModuleCapabilityScope } from './providerFieldSchemas';
-import { getProviderFieldsForModule, LLM_CHAT_MODULES } from './providerFieldSchemas';
+import {
+  getProviderFieldsForModule,
+  LLM_CHAT_MODULES,
+  PROVIDER_SCHEMAS,
+} from './providerFieldSchemas';
 import type { ProviderAccountWriteDto } from '../services/engine/EngineApiClient';
 
 export interface AccountSchema {
@@ -307,10 +311,92 @@ export function accountFieldKeys(type: string): ReadonlySet<string> {
 }
 
 /**
+ * The squashed spelling the engine's legacy provider-config JSON tags use:
+ * lowercase with every underscore removed (`similarity_boost` →
+ * `similarityboost`, `max_completion_tokens` → `maxcompletiontokens`,
+ * `api_key` → `apikey`).
+ */
+function squashKey(key: string): string {
+  return key.replace(/_/g, '').toLowerCase();
+}
+
+/**
+ * Capability keys the engine's provider structs carry but not every app schema
+ * declares (they are shared / advanced-only). Without these the squashed read
+ * spellings (`extraparams`, `responseformat`, `maxtokens`) would not
+ * round-trip: the engine decodes `capability_json` into snake_case structs, so
+ * a squashed key saved back is silently ignored.
+ */
+const SHARED_CAPABILITY_KEYS: readonly string[] = [
+  'extra_params',
+  'response_format',
+  'max_tokens',
+  'max_completion_tokens',
+];
+
+/**
+ * Every key the app recognises for a provider type: the account columns/extras
+ * plus EVERY capability field the provider declares (across all modules — a
+ * module-config read carries the provider's whole merged object, not only the
+ * current module's subset).
+ */
+function knownProviderKeys(type: string): Set<string> {
+  const keys = new Set<string>(accountFieldKeys(type));
+  for (const field of PROVIDER_SCHEMAS[type]?.fields ?? []) keys.add(field.key);
+  for (const key of SHARED_CAPABILITY_KEYS) keys.add(key);
+  return keys;
+}
+
+/**
+ * Canonicalize the engine's merged provider object into this app's snake_case
+ * keys (provider-registry read path).
+ *
+ * The engine's module-config read inlines the provider's config struct, whose
+ * legacy JSON tags are the historical column names WITHOUT underscores
+ * (`voiceid`, `modelid`, `similarityboost`, `speakerboost`, `apikey`,
+ * `baseurl`, `maxtokens`, `topp`, `stoptokens`, `samplingpresetname`, …). The
+ * app's capability schema (and the `capability_json` it writes back, which the
+ * engine decodes into its snake_case model structs) uses snake_case, so without
+ * this projection the edit form shows those values EMPTY and re-saving would
+ * both lose them and persist the account `apikey`/`baseurl` into the overlay.
+ *
+ * The projection is key-driven, not a hand-maintained table: an unrecognised
+ * key is matched against the known keys by its squashed spelling. Unknown keys
+ * (new engine fields, forward-compat) pass through unchanged; an ambiguous
+ * squash match (two known keys normalise identically) keeps the original key.
+ */
+export function canonicalProviderKeys(
+  type: string,
+  merged: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!merged) return {};
+  const known = knownProviderKeys(type);
+  const bySquashed = new Map<string, string | null>();
+  for (const key of known) {
+    const squashed = squashKey(key);
+    bySquashed.set(squashed, bySquashed.has(squashed) ? null : key);
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (known.has(key)) {
+      out[key] = value;
+      continue;
+    }
+    out[bySquashed.get(squashKey(key)) ?? key] = value;
+  }
+  return out;
+}
+
+/**
  * Strip the account half out of a merged provider object → the capability
  * overlay (the module config's `capability_json`, plan §3.2/§3.4). The exact
  * complement of {@link accountFieldKeys}: every capability key (model, sampling
  * params, voices, …) is kept, every account key (columns + typed extras) drops.
+ *
+ * Keys are canonicalized first ({@link canonicalProviderKeys}) so the engine's
+ * legacy squashed spellings (`apikey`, `voiceid`, …) are matched — and stripped
+ * or re-emitted — under the app's snake_case names.
  */
 export function capabilityOverlayOf(
   type: string,
@@ -318,8 +404,9 @@ export function capabilityOverlayOf(
 ): Record<string, unknown> {
   if (!merged) return {};
   const accountKeys = accountFieldKeys(type);
+  const canonical = canonicalProviderKeys(type, merged);
   const overlay: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(merged)) {
+  for (const [key, value] of Object.entries(canonical)) {
     if (accountKeys.has(key)) continue;
     overlay[key] = value;
   }

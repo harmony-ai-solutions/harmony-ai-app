@@ -31,7 +31,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   TextInput,
   KeyboardAvoidingView,
   Platform,
@@ -55,6 +54,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { KeyboardAwareScrollView } from '../components/themed/KeyboardAwareScrollView';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileImagePicker } from '../components/characters/ProfileImagePicker';
@@ -1102,7 +1102,7 @@ export const PersonaEditScreen: React.FC = () => {
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
+        <KeyboardAwareScrollView
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -1469,7 +1469,7 @@ export const PersonaEditScreen: React.FC = () => {
             style={styles.saveButton}
             testID="save-persona-button"
           />
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
   );

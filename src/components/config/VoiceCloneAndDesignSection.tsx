@@ -42,6 +42,7 @@ import {
   getSpeechOptions,
   resolveEffectiveSpeechOptions,
 } from '../../constants/modelCapabilities';
+import { getProviderModelFieldKey } from '../../constants/providerFieldSchemas';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 import type { ModelInfoDto } from '../../services/engine/EngineApiClient';
 import AudioRecorder from '../../services/AudioRecorder';
@@ -129,8 +130,12 @@ export const VoiceCloneAndDesignSection: React.FC<
 
   if (!theme) return null;
 
+  // The model id lives under the provider's own capability key — `model` for
+  // most providers, `model_id` for ElevenLabs.
+  const modelId = capability[getProviderModelFieldKey(providerType, 'tts')];
+
   const speech =
-    resolveEffectiveSpeechOptions(selectedModel, capability.model, providerType) ??
+    resolveEffectiveSpeechOptions(selectedModel, modelId, providerType) ??
     getSpeechOptions(selectedModel);
   const operationModes = speech?.operation_modes ?? [];
   const supportsCloning =
@@ -185,7 +190,7 @@ export const VoiceCloneAndDesignSection: React.FC<
       const res = await engineApiClient.embedSpeaker({
         provider: providerType,
         provider_account_id: accountId,
-        model: capability.model,
+        model: modelId,
         capability_json: capability,
         input_audio: inputAudio,
       });
@@ -496,7 +501,7 @@ export const VoiceCloneAndDesignSection: React.FC<
     // cannot synthesize without a speaker embedding at all (research
     // soulbits-model-defaults.md §3/§7), so a persisted single-speaker choice
     // must not win there — and the single-speaker tab is hidden entirely.
-    const requiresEmbedding = String(selectedModel?.id ?? capability.model ?? '')
+    const requiresEmbedding = String(selectedModel?.id ?? modelId ?? '')
       .toLowerCase()
       .includes('harmonyspeech');
     const singleSpeakerSupported =
@@ -563,7 +568,7 @@ export const VoiceCloneAndDesignSection: React.FC<
                 </View>
                 <ThemedText size={10.5} numberOfLines={1} style={styles.embeddingSubtitle}>
                   {`Extracted for ${
-                    selectedModel?.id || capability.model || 'openvoice_v2'
+                    selectedModel?.id || modelId || 'openvoice_v2'
                   }`}
                 </ThemedText>
                 {gradientButton(

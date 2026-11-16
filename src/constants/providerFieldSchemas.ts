@@ -117,8 +117,8 @@ export interface FieldDefinition {
   /**
    * Marks a field as catalog-backed. The form renderer routes such fields
    * through the model picker (`CatalogModelSelect`) — fed by the engine's
-   * capability registry + live discovery (provider-registry 6-3). `model` and
-   * xAI's `image_model` use this today.
+   * capability registry + live discovery (provider-registry 6-3). `model`,
+   * ElevenLabs' `model_id` and xAI's `image_model` use this.
    */
   catalog?: boolean;
 }
@@ -167,6 +167,38 @@ export function withCanonicalCompletionTokens<T extends Record<string, any>>(
   const legacy = Number(capability.max_tokens);
   if (!Number.isFinite(legacy) || legacy <= 0) return capability;
   return { ...capability, [MAX_COMPLETION_TOKENS_KEY]: legacy };
+}
+
+/**
+ * Capability keys that name a provider's model selection. `model` is the
+ * default; xAI's imagination provider uses `image_model`, ElevenLabs uses the
+ * keys its engine decodes (`model_id` for TTS, `stt_model_id` for STT).
+ */
+const MODEL_FIELD_KEYS: ReadonlySet<string> = new Set([
+  'model',
+  'model_id',
+  'stt_model_id',
+  'image_model',
+]);
+
+/**
+ * The capability key that holds the model selection for a provider + module.
+ *
+ * Most providers store their model under `model`, but the key is not universal:
+ * xAI's imagination provider uses `image_model` and ElevenLabs uses
+ * `model_id`/`stt_model_id`. Callers that need the selected model id —
+ * metadata badge, stale check, layout ordering — must read this instead of
+ * hard-coding `model`.
+ */
+export function getProviderModelFieldKey(
+  providerType: string,
+  modelModuleType: string,
+): string {
+  const fields = getProviderFieldsForModule(providerType, modelModuleType);
+  const modelField = fields.find(
+    (f) => f.catalog === true || MODEL_FIELD_KEYS.has(f.key),
+  );
+  return modelField?.key ?? 'model';
 }
 
 /**
@@ -275,10 +307,15 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   elevenlabs: {
     hasModelFetch: false,
     fields: [
-      // `model` is shared with the STT slot (Phase 3-6 wires ElevenLabs Scribe).
-      { key: 'model', label: 'Model', type: 'text', placeholder: 'eleven_multilingual_v2', modules: ['tts', 'stt'] },
+      // The model keys are the engine's own (`capability_json` decodes into
+      // `models.ElevenLabsProviderConfig`): TTS reads `model_id`, STT reads
+      // `stt_model_id`. Writing `model` here would be silently ignored.
+      // Both are catalog-backed: TTS from the live model listing, STT from the
+      // engine's curated Scribe catalog (ElevenLabs exposes no live STT
+      // listing), so the STT picker is catalog-backed too.
+      { key: 'model_id', label: 'Model', type: 'text', placeholder: 'eleven_multilingual_v2', catalog: true, modules: ['tts'] },
+      { key: 'stt_model_id', label: 'Model', type: 'text', placeholder: 'scribe_v3', catalog: true, modules: ['stt'] },
       { key: 'voice_id', label: 'Voice ID', type: 'text', placeholder: '21m00Tcm4TlvDq8ikWAM', modules: ['tts'] },
-      { key: 'model_id', label: 'Model ID', type: 'text', placeholder: 'eleven_monolingual_v1', modules: ['tts'] },
       { key: 'stability', label: 'Stability', type: 'number', step: 0.05, min: 0, max: 1, placeholder: '0.5', width: 'half', modules: ['tts'] },
       { key: 'similarity_boost', label: 'Similarity Boost', type: 'number', step: 0.05, min: 0, max: 1, placeholder: '0.75', width: 'half', modules: ['tts'] },
       { key: 'style', label: 'Style', type: 'number', step: 0.05, min: 0, max: 1, placeholder: '0.0', width: 'half', modules: ['tts'] },

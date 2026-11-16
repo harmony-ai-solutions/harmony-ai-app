@@ -13,6 +13,7 @@ import { clampToField, isCompleteNumber } from '../../utils/numericField';
 import { hapticLightPress } from '../../utils/haptics';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { useKeyboardAwareFocus } from '../themed/KeyboardAwareScrollView';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SelectPicker } from './SelectPicker';
 
@@ -31,6 +32,7 @@ interface FormFieldProps {
 
 export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, readOnly = false, testID }) => {
   const { theme } = useAppTheme();
+  const onInputFocus = useKeyboardAwareFocus();
   const [showPassword, setShowPassword] = useState(false);
   const [trackWidth, setTrackWidth] = useState(0);
   // Raw text being typed into a number field (null = not focused). The draft
@@ -151,6 +153,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             style={styles.sliderValueInput}
             value={numericDisplayValue()}
             onChangeText={handleChange}
+            onFocus={onInputFocus}
             onBlur={finalizeNumber}
             placeholder={field.placeholder}
             keyboardType="decimal-pad"
@@ -258,6 +261,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
               ]}
               value={value?.toString() || ''}
               onChangeText={handleChange}
+              onFocus={onInputFocus}
               placeholder={field.placeholder}
               secureTextEntry={!showPassword}
               placeholderTextColor={theme.colors.text.muted}
@@ -292,6 +296,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             ]}
             value={numericDisplayValue()}
             onChangeText={handleChange}
+            onFocus={onInputFocus}
             onBlur={finalizeNumber}
             placeholder={field.placeholder}
             keyboardType="decimal-pad"
@@ -364,6 +369,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             ]}
             value={listDisplayVal}
             onChangeText={(text) => onChange(field.key, text)}
+            onFocus={onInputFocus}
             placeholder={field.placeholder}
             editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}
@@ -396,6 +402,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             ]}
             value={value?.toString() || ''}
             onChangeText={handleChange}
+            onFocus={onInputFocus}
             placeholder={field.placeholder}
             editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}

@@ -38,13 +38,13 @@ import {
   TextInput,
   FlatList,
   ActivityIndicator,
-  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedEmptyState } from '../themed/ThemedEmptyState';
 import { hexToRgba } from '../../utils/colorUtils';
@@ -96,23 +96,9 @@ export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   // Height of the soft keyboard (0 when hidden) — keeps the search bar + list
-  // visible without double-compensating via KeyboardAvoidingView.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-
-  // ── Keyboard inset (edge-to-edge Android: adjustResize doesn't fire) ──
-  useEffect(() => {
-    const onShow = (e: any) => {
-      setKeyboardHeight(e?.endCoordinates?.height ?? 300);
-    };
-    const onHide = () => setKeyboardHeight(0);
-    const subs = [
-      Keyboard.addListener('keyboardWillShow', onShow),
-      Keyboard.addListener('keyboardDidShow', onShow),
-      Keyboard.addListener('keyboardWillHide', onHide),
-      Keyboard.addListener('keyboardDidHide', onHide),
-    ];
-    return () => subs.forEach(s => s.remove());
-  }, []);
+  // visible without double-compensating via KeyboardAvoidingView. Android
+  // edge-to-edge: adjustResize doesn't fire, so the inset comes from the events.
+  const keyboardHeight = useKeyboardHeight();
 
   // Load picker rows + primary avatars each time the picker opens — or the
   // impersonated persona changes (the row set is persona-scoped, ruling 2).

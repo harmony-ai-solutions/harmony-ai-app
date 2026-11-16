@@ -107,7 +107,24 @@ jest.mock('../../../hooks/useProviderModels', () => ({
 jest.mock('../AccountPicker', () => ({ AccountPicker: () => null }));
 jest.mock('../VoiceProfileBar', () => ({ VoiceProfileBar: () => null }));
 jest.mock('../SoulbitsModelSelect', () => ({ SoulbitsModelSelect: () => null }));
-jest.mock('../CatalogModelSelect', () => ({ CatalogModelSelect: () => null }));
+jest.mock('../CatalogModelSelect', () => {
+  const React = require('react');
+  const { View, Text, TouchableOpacity } = require('react-native');
+  return {
+    CatalogModelSelect: ({ value, label, onChange }: any) =>
+      React.createElement(
+        View,
+        { testID: 'catalog-model-select' },
+        React.createElement(Text, null, label),
+        React.createElement(Text, null, value ?? ''),
+        React.createElement(
+          TouchableOpacity,
+          { testID: 'catalog-model-select-pick', onPress: () => onChange('custom-model') },
+          React.createElement(Text, null, 'pick'),
+        ),
+      ),
+  };
+});
 jest.mock('../AdvancedSamplingParams', () => ({ AdvancedSamplingParams: () => null }));
 jest.mock('../VoiceCloneAndDesignSection', () => {
   const React = require('react');
@@ -315,5 +332,61 @@ describe('ProviderSlotSection — models that declare no voices', () => {
     // Still no speaker picker / no static fallback.
     expect(utils.queryByLabelText('baseVoice')).toBeNull();
     expectNoStaticFallback(utils);
+  });
+});
+
+describe('ProviderSlotSection — ElevenLabs model key', () => {
+  async function renderElevenLabsSlot(
+    modelModuleType: 'tts' | 'stt',
+    capability: Record<string, any>,
+  ) {
+    mockCatalog = { elevenlabs: [] };
+    const onCapabilityChange = jest.fn();
+    const utils = await render(
+      <ProviderSlotSection
+        slot="provider"
+        slotLabel=""
+        modelModuleType={modelModuleType}
+        providerOptions={[{ id: 'elevenlabs', name: 'ElevenLabs', icon: 'cloud' }]}
+        state={{ providerType: 'elevenlabs', accountId: null, capability }}
+        accounts={[]}
+        showAdvanced={false}
+        explicitFields={{}}
+        onProviderChange={jest.fn()}
+        onAccountChange={jest.fn()}
+        onCapabilityChange={onCapabilityChange}
+        onAddAccount={jest.fn()}
+      />,
+    );
+    return { utils, onCapabilityChange };
+  }
+
+  it('TTS shows the engine-stored model_id in the picker and writes it back', async () => {
+    const { utils, onCapabilityChange } = await renderElevenLabsSlot('tts', {
+      model_id: 'eleven_multilingual_v2',
+      voice_id: '',
+    });
+
+    // One model picker, seeded from `model_id` — no separate "Model ID" field.
+    const pickers = utils.getAllByTestId('catalog-model-select');
+    expect(pickers).toHaveLength(1);
+    expect(within(pickers[0]).getByText('eleven_multilingual_v2')).toBeTruthy();
+
+    fireEvent.press(utils.getByTestId('catalog-model-select-pick'));
+    expect(onCapabilityChange).toHaveBeenCalledWith('model_id', 'custom-model');
+  });
+
+  it('STT shows the engine’s Scribe catalog picker and writes stt_model_id', async () => {
+    const { utils, onCapabilityChange } = await renderElevenLabsSlot('stt', {
+      stt_model_id: 'scribe_v2',
+    });
+
+    // The engine serves the curated Scribe catalog, so STT is catalog-backed.
+    const pickers = utils.getAllByTestId('catalog-model-select');
+    expect(pickers).toHaveLength(1);
+    expect(within(pickers[0]).getByText('scribe_v2')).toBeTruthy();
+
+    fireEvent.press(utils.getByTestId('catalog-model-select-pick'));
+    expect(onCapabilityChange).toHaveBeenCalledWith('stt_model_id', 'custom-model');
   });
 });

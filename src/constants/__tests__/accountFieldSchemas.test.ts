@@ -11,6 +11,8 @@ import {
   ACCOUNT_SCHEMAS,
   accountToFormValues,
   accountValuesToWriteDto,
+  canonicalProviderKeys,
+  capabilityOverlayOf,
   isAccountManaged,
   maskApiKey,
   validateAccount,
@@ -167,6 +169,127 @@ describe('accountToFormValues', () => {
     expect(
       accountToFormValues('openai', { name: 'n', api_key: 'sk', base_url: '', extra: 'not json' }),
     ).toEqual({ name: 'n', api_key: 'sk', base_url: '' });
+  });
+});
+
+describe('capabilityOverlayOf — engine squashed-key projection', () => {
+  it('restores the ElevenLabs snake_case keys and strips the account half', () => {
+    // The engine's composite read inlines its config struct: squashed legacy
+    // tags (`voiceid`, `similarityboost`, `apikey`, `baseurl`, …).
+    const merged = {
+      id: 'acct-1',
+      apikey: 'el-secret',
+      baseurl: '',
+      voiceid: '21m00Tcm4TlvDq8ikWAM',
+      modelid: 'eleven_multilingual_v2',
+      stability: 0.5,
+      similarityboost: 0.75,
+      style: 0.2,
+      speakerboost: 1,
+      speed: 1.1,
+      output_format: 'mp3_44100_128',
+      language_code: 'en',
+      apply_text_normalization: 'auto',
+      seed: 42,
+      stt_model_id: 'scribe_v2',
+    };
+
+    const overlay = capabilityOverlayOf('elevenlabs', merged);
+
+    expect(overlay).toEqual({
+      voice_id: '21m00Tcm4TlvDq8ikWAM',
+      model_id: 'eleven_multilingual_v2',
+      stability: 0.5,
+      similarity_boost: 0.75,
+      style: 0.2,
+      speaker_boost: 1,
+      speed: 1.1,
+      output_format: 'mp3_44100_128',
+      language_code: 'en',
+      apply_text_normalization: 'auto',
+      seed: 42,
+      stt_model_id: 'scribe_v2',
+    });
+    // The API key / base URL are ACCOUNT fields — never copied into the
+    // capability overlay (they would otherwise be re-saved into it).
+    expect(overlay).not.toHaveProperty('apikey');
+    expect(overlay).not.toHaveProperty('api_key');
+    expect(overlay).not.toHaveProperty('baseurl');
+    expect(overlay).not.toHaveProperty('base_url');
+  });
+
+  it('projects the OpenAI-family sampling keys', () => {
+    const overlay = capabilityOverlayOf('openai', {
+      id: 'acct',
+      apikey: 'sk',
+      model: 'gpt-4o',
+      maxcompletiontokens: 512,
+      topp: 0.9,
+      frequencypenalty: 0.1,
+      presencepenalty: 0.2,
+      stoptokens: ['STOP'],
+      responseformat: 'json_object',
+      samplingpresetname: 'Balanced',
+      extraparams: '{}',
+      seed: 7,
+    });
+
+    expect(overlay).toEqual({
+      model: 'gpt-4o',
+      max_completion_tokens: 512,
+      top_p: 0.9,
+      frequency_penalty: 0.1,
+      presence_penalty: 0.2,
+      stop_tokens: ['STOP'],
+      response_format: 'json_object',
+      sampling_preset_name: 'Balanced',
+      extra_params: '{}',
+      seed: 7,
+    });
+  });
+
+  it('keeps already-canonical and unknown keys untouched', () => {
+    const merged = {
+      model: 'eleven_v3',
+      similarity_boost: 0.6,
+      future_param: true,
+    };
+    const overlay = capabilityOverlayOf('elevenlabs', merged);
+    expect(overlay).toEqual({
+      model: 'eleven_v3',
+      similarity_boost: 0.6,
+      future_param: true,
+    });
+  });
+
+  it('canonicalizes an OpenAI-compatible / soulvoice account endpoint', () => {
+    const merged = {
+      id: 'acct',
+      endpoint: 'http://localhost:8765',
+      model: 'harmony',
+      voiceconfigfile: 'Claire.voice.json',
+      operation_mode: 'single_speaker_tts',
+      cfg_weight: 0.5,
+      norm_loudness: 1,
+      samplerate: 24000,
+    };
+    expect(capabilityOverlayOf('soulvoice', merged)).toEqual({
+      model: 'harmony',
+      voice_config_file: 'Claire.voice.json',
+      operation_mode: 'single_speaker_tts',
+      cfg_weight: 0.5,
+      norm_loudness: 1,
+      sample_rate: 24000,
+    });
+    // `endpoint` is the soulvoice ACCOUNT base URL.
+    expect(capabilityOverlayOf('soulvoice', merged)).not.toHaveProperty('endpoint');
+  });
+
+  it('exposes the canonical projection for direct callers', () => {
+    expect(canonicalProviderKeys('elevenlabs', { voiceid: 'v' })).toEqual({
+      voice_id: 'v',
+    });
+    expect(canonicalProviderKeys('elevenlabs', null)).toEqual({});
   });
 });
 

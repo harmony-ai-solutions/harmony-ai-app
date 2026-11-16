@@ -17,7 +17,6 @@ import {
   TouchableOpacity,
   TextInput,
   Image,
-  Keyboard,
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +25,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBiometricLock } from '../../contexts/BiometricLockContext';
 import { useInModalToast } from '../modals/InModalToast';
@@ -62,7 +62,9 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
   const [publishing, setPublishing] = useState(false);
   // Height of the soft keyboard (0 when hidden) — used as bottom padding so the
   // composer stays visible without double-compensating via KeyboardAvoidingView.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // Android edge-to-edge: adjustResize doesn't fire, so the inset comes from the
+  // keyboard events (the shared hook subscribes to all four).
+  const keyboardHeight = useKeyboardHeight();
 
   // Reset on open
   useEffect(() => {
@@ -73,23 +75,6 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
       setPublishing(false);
     }
   }, [visible]);
-
-  // ── Keyboard inset — lift the composer above the soft keyboard (edge-to-edge
-  // Android: adjustResize doesn't fire). Manual listeners avoid the double
-  // compensation that KeyboardAvoidingView causes inside a full-screen modal.
-  useEffect(() => {
-    const onShow = (e: any) => {
-      setKeyboardHeight(e?.endCoordinates?.height ?? 300);
-    };
-    const onHide = () => setKeyboardHeight(0);
-    const subs = [
-      Keyboard.addListener('keyboardWillShow', onShow),
-      Keyboard.addListener('keyboardDidShow', onShow),
-      Keyboard.addListener('keyboardWillHide', onHide),
-      Keyboard.addListener('keyboardDidHide', onHide),
-    ];
-    return () => subs.forEach(s => s.remove());
-  }, []);
 
   if (!theme) return null;
 

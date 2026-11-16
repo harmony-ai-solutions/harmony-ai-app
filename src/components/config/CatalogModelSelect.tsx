@@ -25,6 +25,7 @@ import { View, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { useKeyboardAwareFocus } from '../themed/KeyboardAwareScrollView';
 import { SelectPicker } from './SelectPicker';
 import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityCatalog';
 import { catalogModelsForModule, findModel } from '../../constants/modelCapabilities';
@@ -95,6 +96,7 @@ export const CatalogModelSelect: React.FC<CatalogModelSelectProps> = ({
   stale = false,
 }) => {
   const { theme } = useAppTheme();
+  const onInputFocus = useKeyboardAwareFocus();
   const { t } = useTranslation('moduleConfig');
   const { catalog } = useProviderCapabilityCatalog();
 
@@ -226,6 +228,7 @@ export const CatalogModelSelect: React.FC<CatalogModelSelectProps> = ({
             if (text === '' && entries.length > 0) setCustomRequested(false);
             onChange(text);
           }}
+          onFocus={onInputFocus}
           placeholder={t('modelCustom')}
           placeholderTextColor={theme.colors.text.muted}
           testID={CUSTOM_MODEL_INPUT_TESTID}

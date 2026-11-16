@@ -24,6 +24,28 @@ const noTemp: ModelInfoDto = { id: 'notemp-1', capabilities: ['chat'], param_sup
 // must never be treated as a param set.
 const visionOnly: ModelInfoDto = { id: 'vision-1', capabilities: ['vision'] };
 
+// Catalog-vocabulary rows (the engine emits semantic tags, not module names).
+const allCapsLlm: ModelInfoDto = {
+  id: 'llm-1',
+  capabilities: ['tools', 'vision'],
+  modalities: ['text', 'image'],
+};
+const ttsModel: ModelInfoDto = {
+  id: 'tts-1',
+  capabilities: ['text_to_speech'],
+  modalities: ['text', 'audio'],
+};
+const sttModel: ModelInfoDto = {
+  id: 'stt-1',
+  capabilities: ['speech_to_text'],
+  modalities: ['audio'],
+};
+const embeddingsModel: ModelInfoDto = {
+  id: 'embed-2',
+  modalities: ['text'],
+  capabilities: [],
+};
+
 describe('catalogModelsForModule', () => {
   const models = [chat, embed, unknown];
 
@@ -35,7 +57,7 @@ describe('catalogModelsForModule', () => {
   });
 
   it('maps rag → embedding', () => {
-    expect(MODULE_CAPABILITY_TAGS.rag).toBe('embedding');
+    expect(MODULE_CAPABILITY_TAGS.rag).toEqual(['embedding']);
     expect(catalogModelsForModule(models, 'rag').map((m) => m.id)).toContain('embed-1');
   });
 
@@ -46,6 +68,33 @@ describe('catalogModelsForModule', () => {
   it('handles a null/undefined list', () => {
     expect(catalogModelsForModule(null, 'backend')).toEqual([]);
     expect(catalogModelsForModule(undefined, 'backend')).toEqual([]);
+  });
+
+  it('accepts the semantic text_to_speech tag for the tts module', () => {
+    const ids = catalogModelsForModule([ttsModel, chat], 'tts').map((m) => m.id);
+    expect(ids).toEqual(['tts-1']);
+  });
+
+  it('accepts the semantic speech_to_text tag for the stt module', () => {
+    const ids = catalogModelsForModule([sttModel, ttsModel], 'stt').map((m) => m.id);
+    expect(ids).toEqual(['stt-1']);
+  });
+
+  it('treats a tools/vision chat row as an LLM and as a vision model', () => {
+    expect(catalogModelsForModule([allCapsLlm], 'backend').map((m) => m.id)).toEqual(['llm-1']);
+    expect(catalogModelsForModule([allCapsLlm], 'cognition').map((m) => m.id)).toEqual(['llm-1']);
+    expect(catalogModelsForModule([allCapsLlm], 'vision').map((m) => m.id)).toEqual(['llm-1']);
+  });
+
+  it('does not treat an embeddings row (no semantic chat tag) as an LLM', () => {
+    expect(embeddingsModel.capabilities).toEqual([]);
+    expect(catalogModelsForModule([embeddingsModel], 'backend')).toEqual([]);
+    expect(catalogModelsForModule([embeddingsModel], 'rag')).toEqual([]);
+  });
+
+  it('keeps a model with no capability/modality metadata (unknown ⇒ don\'t hide)', () => {
+    expect(catalogModelsForModule([unknown], 'backend').map((m) => m.id)).toEqual(['unknown-1']);
+    expect(catalogModelsForModule([unknown], 'tts').map((m) => m.id)).toEqual(['unknown-1']);
   });
 });
 

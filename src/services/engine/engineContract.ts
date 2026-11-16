@@ -404,7 +404,7 @@ export const REQUIRED_ENGINE_ENDPOINTS: ContractEndpoint[] = [
     method: 'GET',
     path: '/api/providers/capabilities',
     fixture: 'providerCapabilities',
-    note: 'tier-2 capability catalog + param mapping (5-2)',
+    note: 'tier-2 capability registry (providers.<type>.models map + wire param map)',
   },
   {
     id: 'providers.list',

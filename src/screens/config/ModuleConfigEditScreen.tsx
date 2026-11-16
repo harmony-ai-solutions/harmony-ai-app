@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
-  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Platform,
@@ -25,6 +24,7 @@ const log = createLogger('[ModuleConfigEditScreen]');
 const MODE_TOGGLE_KEY = 'module_config_show_advanced';
 
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
+import { KeyboardAwareScrollView } from '../../components/themed/KeyboardAwareScrollView';
 import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
@@ -47,6 +47,7 @@ import {
 import type { FieldDefinition } from '../../constants/providerFieldSchemas';
 import {
   getProviderFieldsForModule,
+  getProviderModelFieldKey,
   withCanonicalCompletionTokens,
 } from '../../constants/providerFieldSchemas';
 import {
@@ -757,12 +758,26 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   const moduleConfig = getModuleConfig();
 
+  /**
+   * The selected model id of a slot, read under the provider's own capability
+   * key (`model` for most, ElevenLabs `model_id`/`stt_model_id`, xAI
+   * `image_model`).
+   */
+  const selectedModelValueOf = (slot: string, mmType: string): string => {
+    const slotState = slots[slot];
+    if (!slotState?.providerType) return '';
+    const key = getProviderModelFieldKey(slotState.providerType, mmType);
+    const value = slotState.capability?.[key];
+    return value == null ? '' : String(value);
+  };
+
   // ── Selected TTS model (for test-panel paralinguistic tags) ──
   const ttsSlot = slots.provider;
   const selectedTtsModel = useMemo(() => {
     if (moduleType !== 'tts' || !ttsSlot?.providerType) return null;
+    const key = getProviderModelFieldKey(ttsSlot.providerType, 'tts');
     const entries = catalogModelsForModule(catalog[ttsSlot.providerType], 'tts');
-    return findModel(entries, ttsSlot.capability?.model) ?? null;
+    return findModel(entries, ttsSlot.capability?.[key]) ?? null;
   }, [moduleType, ttsSlot, catalog]);
 
   // ── Loading state ──
@@ -948,17 +963,19 @@ export const ModuleConfigEditScreen: React.FC = () => {
       const found = providerOptionsForSlot(slot).find((p) => p.id === id);
       return found?.name ?? id;
     };
-    const vadModelLabel = vad?.capability?.model
-      ? String(vad.capability.model) === 'silero-vad'
+    const vadModel = selectedModelValueOf('vad', 'vad');
+    const txModel = selectedModelValueOf('transcription', 'stt');
+    const vadModelLabel = vadModel
+      ? vadModel === 'silero-vad'
         ? 'Silero VAD'
-        : String(vad.capability.model)
+        : vadModel
       : vad?.providerType
         ? 'Silero VAD'
         : 'Disabled';
-    const txModelLabel = tx?.capability?.model
-      ? String(tx.capability.model).includes('whisper')
+    const txModelLabel = txModel
+      ? txModel.includes('whisper')
         ? 'FasterWhisper'
-        : String(tx.capability.model)
+        : txModel
       : 'FasterWhisper';
 
     return (
@@ -1084,7 +1101,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
               <ThemedText size={10.5} numberOfLines={1} style={styles.pipelineStageTxCaption}>
                 {tx?.providerType
                   ? `${providerLabelFor('transcription', tx.providerType)} · ${
-                      tx?.capability?.model || 'v3-turbo'
+                      txModel || 'v3-turbo'
                     }`
                   : 'Select provider'}
               </ThemedText>
@@ -1243,7 +1260,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
+        <KeyboardAwareScrollView
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 48 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -1358,7 +1375,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
               </View>
             </ThemedCard>
           )}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
 
       {/* ── "Add account…" modal (shared AccountForm, 6-2) ── */}
@@ -1375,13 +1392,21 @@ export const ModuleConfigEditScreen: React.FC = () => {
                 <ThemedText size={16} weight="bold" style={styles.modalTitle}>
                   {t('accountAddTitle')}
                 </ThemedText>
-                <AccountForm
-                  key={editorProviderType}
-                  type={editorProviderType}
-                  submitting={savingAccount}
-                  onSubmit={handleSubmitAccount}
-                  onCancel={() => setEditorSlot(null)}
-                />
+                {/* Edge-to-edge Android: keep the key/base-URL fields above
+                    the soft keyboard inside the bottom sheet. */}
+                <KeyboardAwareScrollView
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <AccountForm
+                    key={editorProviderType}
+                    type={editorProviderType}
+                    submitting={savingAccount}
+                    onSubmit={handleSubmitAccount}
+                    onCancel={() => setEditorSlot(null)}
+                  />
+                </KeyboardAwareScrollView>
               </>
             )}
           </View>
@@ -1539,5 +1564,7 @@ const styles = StyleSheet.create({
     padding: 20,
     maxHeight: '85%',
   },
+  modalScroll: { flexShrink: 1 },
+  modalScrollContent: { paddingBottom: 8 },
   modalTitle: { marginBottom: 12 },
 });

@@ -572,16 +572,28 @@ describe('provider accounts transport', () => {
     });
   });
 
-  it('GETs the capability catalog', async () => {
+  it('GETs the capability registry (engine providers payload)', async () => {
     const server = createMockManagementServer([
       {
         method: 'GET',
         path: '/api/providers/capabilities',
-        json: { catalog: { openai: [{ id: 'gpt-4o' }] }, param_mapping: { mistral: { seed: 'random_seed' } } },
+        json: {
+          meta: { source: 'soulbits-tier2' },
+          providers: {
+            mistral: {
+              wire: { seed: { wire: 'random_seed', route: 'extra' } },
+              models: {
+                'mistral-large': { label: 'Mistral Large', capabilities: ['chat'] },
+              },
+            },
+          },
+        },
       },
     ]);
     const res = await clientWith(server).getProviderCapabilities();
-    expect(res.param_mapping?.mistral.seed).toBe('random_seed');
+    expect(res.providers?.mistral.wire?.seed.wire).toBe('random_seed');
+    expect(res.providers?.mistral.models?.['mistral-large'].label).toBe('Mistral Large');
+    expect(res.meta?.source).toBe('soulbits-tier2');
   });
 });
 

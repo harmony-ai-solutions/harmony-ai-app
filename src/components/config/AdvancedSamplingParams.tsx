@@ -7,6 +7,7 @@ import { parseExtraParams, serializeExtraParams } from '../../utils/configHelper
 import { isCompleteNumber } from '../../utils/numericField';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { useKeyboardAwareFocus } from '../themed/KeyboardAwareScrollView';
 
 interface AdvancedSamplingParamsProps {
   extraParamsJson: string;
@@ -26,6 +27,7 @@ const NumberParamInput: React.FC<{
   onRemove: () => void;
 }> = ({ value, onCommit, onRemove }) => {
   const { theme } = useAppTheme();
+  const onInputFocus = useKeyboardAwareFocus();
   const [draft, setDraft] = useState<string | null>(null);
   if (!theme) return null;
 
@@ -60,6 +62,7 @@ const NumberParamInput: React.FC<{
       ]}
       value={display}
       onChangeText={handleChange}
+      onFocus={onInputFocus}
       onBlur={handleBlur}
       keyboardType="decimal-pad"
     />
@@ -71,6 +74,7 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
   onChange,
 }) => {
   const { theme } = useAppTheme();
+  const onInputFocus = useKeyboardAwareFocus();
   const [expanded, setExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [params, setParams] = useState<Record<string, any>>({});
@@ -172,6 +176,7 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
               ]}
               value={value?.toString() || ''}
               onChangeText={(text) => handleValueChange(key, text)}
+              onFocus={onInputFocus}
             />
           )}
         </View>

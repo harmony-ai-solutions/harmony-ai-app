@@ -552,12 +552,77 @@ export interface ProviderModelsResponseDto {
 }
 
 /**
+ * One model entry of the engine's tier-2 catalog
+ * (`providers.<type>.models.<modelId>` — `providers/catalog.go:CatalogModel`).
+ *
+ * The catalog vocabulary is SEMANTIC: `capabilities` carries high-level tags
+ * like `text_to_speech` / `speech_to_text`, not the app's module names.
+ */
+export interface CatalogModelDto {
+  label?: string;
+  family?: string;
+  context?: number;
+  output_limit?: number;
+  modalities?: string[];
+  capabilities?: string[];
+  param_support?: string[];
+  reasoning_effort?: string[];
+  unsupported_params?: string[];
+  /** Catalog freshness (`current` / `deprecated` / …). */
+  status?: string;
+  /** Entry provenance (`curated` / `tier2`). */
+  source?: string;
+  /** TTS capability tree (operation modes, voices, languages, …). */
+  speech_options?: Record<string, unknown>;
+}
+
+/**
+ * One canonical→wire param mapping entry (`providers.<type>.wire.<param>`).
+ * `route` is `native` (provider names the field directly), `extra` (folded into
+ * the provider's extra params) or `drop` (canonical param the provider cannot
+ * take — never forwarded).
+ */
+export interface ProviderCapabilityWireDto {
+  wire: string;
+  route: string;
+}
+
+/** One provider's slice of the tier-2 capability payload. */
+export interface ProviderCapabilitySliceDto {
+  /** Canonical param → provider wire field. */
+  wire?: Record<string, ProviderCapabilityWireDto>;
+  strict?: boolean;
+  strict_allowed?: string[];
+  temperature_max?: number;
+  /** Model catalog keyed by model id (a MAP, not an array). */
+  models?: Record<string, CatalogModelDto>;
+}
+
+/**
  * `GET /api/providers/capabilities` response (tier-2 catalog, phase 5-2).
- * Interim/5-2-owned shape: the static model catalog plus the per-provider
- * param-name mapping. Kept loose so 5-2 can refine it without a DTO break.
+ *
+ * `providers` is the engine's REAL payload shape
+ * (`providers/catalog.go:CapabilitiesPayload`): per-provider slices with the
+ * model MAP, the wire param map, strictness and the temperature ceiling. The
+ * legacy `catalog` / `param_mapping` fields are retained for older engines and
+ * older fixtures; new consumers prefer `providers`.
  */
 export interface ProviderCapabilitiesDto {
+  /** Snapshot metadata (source/license/date/hashes/generator). */
+  meta?: {
+    source?: string;
+    license?: string;
+    license_notice?: string;
+    snapshot_date?: string;
+    snapshot_etag?: string;
+    snapshot_sha256?: string;
+    generator?: string;
+    [key: string]: unknown;
+  };
+  providers?: Record<string, ProviderCapabilitySliceDto>;
+  /** LEGACY pre-`providers` shape: model lists keyed by provider type. */
   catalog?: Record<string, ModelInfoDto[]>;
+  /** LEGACY pre-`providers` shape: per-provider param mapping. */
   param_mapping?: Record<string, Record<string, string>>;
   [key: string]: unknown;
 }

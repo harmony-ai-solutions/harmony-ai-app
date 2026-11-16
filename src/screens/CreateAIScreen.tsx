@@ -20,7 +20,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
-  ScrollView,
   TextInput,
   ActivityIndicator,
   TouchableOpacity,
@@ -35,6 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
+import { KeyboardAwareScrollView } from '../components/themed/KeyboardAwareScrollView';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -1609,7 +1609,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
+        <KeyboardAwareScrollView
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -2249,7 +2249,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
               />
             )}
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
   );

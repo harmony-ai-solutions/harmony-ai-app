@@ -1550,6 +1550,60 @@ describe('modules adapter (flat account FK + capability overlay)', () => {
     expect(JSON.parse(configs[0].capability_json)).toEqual({ model: 'gpt-4o', temperature: 0.7 });
   });
 
+  it('projects the engine squashed ElevenLabs read into the app snake_case overlay', async () => {
+    // Real engine composite shape: the inlined provider struct carries its
+    // legacy squashed JSON tags (`voiceid`, `similarityboost`, `apikey`, …).
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/module-configs/tts',
+        json: [
+          {
+            id: 't1',
+            name: 'Voice',
+            provider: 'elevenlabs',
+            outputtype: 'mp3',
+            wordstoreplace: '{}',
+            vocalizenonverbal: true,
+            elevenlabs: {
+              id: 'acc-el',
+              apikey: 'el-secret',
+              baseurl: '',
+              voiceid: '21m00Tcm4TlvDq8ikWAM',
+              modelid: 'eleven_multilingual_v2',
+              stability: 0.5,
+              similarityboost: 0.8,
+              style: 0.1,
+              speakerboost: 1,
+              speed: 1.2,
+              output_format: 'mp3_44100_128',
+              seed: 3,
+            },
+            deleted_at: null,
+          },
+        ],
+      },
+    ]);
+    install(server);
+    const configs = await modulesRepo.getAllTTSConfigs();
+    expect(configs[0]).toMatchObject({
+      id: 't1',
+      provider: 'elevenlabs',
+      provider_account_id: 'acc-el',
+      output_type: 'mp3',
+      vocalize_nonverbal: 1,
+    });
+    const overlay = JSON.parse(configs[0].capability_json);
+    expect(overlay).toMatchObject({
+      voice_id: '21m00Tcm4TlvDq8ikWAM',
+      model_id: 'eleven_multilingual_v2',
+      similarity_boost: 0.8,
+      speaker_boost: 1,
+    });
+    expect(overlay).not.toHaveProperty('apikey');
+    expect(overlay).not.toHaveProperty('voiceid');
+  });
+
   it('writes the flat provider_account_id + capability_json body straight from the row', async () => {
     const server = createMockManagementServer([
       {

@@ -95,6 +95,7 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
     api_key: '',
     voice_id: '',
     model_id: '',
+    stt_model_id: '',
     stability: 0.5,
     similarity_boost: 0.75,
     style: 0,

@@ -17,6 +17,7 @@ import { View, TextInput, StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { useKeyboardAwareFocus } from '../themed/KeyboardAwareScrollView';
 import { SelectPicker } from './SelectPicker';
 import type { VoiceInfoDto } from '../../services/engine/EngineApiClient';
 
@@ -45,6 +46,7 @@ export const VoicePicker: React.FC<VoicePickerProps> = ({
 }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('moduleConfig');
+  const onInputFocus = useKeyboardAwareFocus();
 
   if (!theme) return null;
 
@@ -77,6 +79,7 @@ export const VoicePicker: React.FC<VoicePickerProps> = ({
           ]}
           value={value}
           onChangeText={onChange}
+          onFocus={onInputFocus}
           placeholder={t('voiceCustom')}
           placeholderTextColor={theme.colors.text.muted}
           testID={VOICE_INPUT_TESTID}
@@ -95,6 +98,11 @@ export const VoicePicker: React.FC<VoicePickerProps> = ({
     options.push({ id: value, name: value });
   }
 
+  // The account catalogue is always shown, but it is NOT model-scoped (a voice
+  // id works across model families; only `verified_languages` names the models
+  // a voice was verified for). The free-text input below stays available so a
+  // voice id copied from the ElevenLabs dashboard — or a brand-new cloned voice
+  // missing from a stale fetch — can always be entered.
   return (
     <View>
       <SelectPicker
@@ -104,6 +112,30 @@ export const VoicePicker: React.FC<VoicePickerProps> = ({
         onChange={onChange}
         placeholder={t('voiceSelectPlaceholder')}
       />
+      <ThemedText size={12} variant="secondary" style={styles.customLabel}>
+        {t('voiceCustom')}
+      </ThemedText>
+      <TextInput
+        style={[
+          styles.input,
+          {
+            color: theme.colors.text.primary,
+            borderColor: theme.colors.border.default,
+            backgroundColor: theme.colors.background.base,
+          },
+        ]}
+        value={value}
+        onChangeText={onChange}
+        onFocus={onInputFocus}
+        placeholder={t('voiceCustomPlaceholder')}
+        placeholderTextColor={theme.colors.text.muted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        testID={VOICE_INPUT_TESTID}
+      />
+      <ThemedText variant="muted" size={11} style={styles.hint}>
+        {t('voiceCustomHint')}
+      </ThemedText>
       {renderStale()}
     </View>
   );
@@ -117,6 +149,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     minHeight: 44,
+  },
+  customLabel: {
+    marginTop: 10,
+    marginBottom: 4,
   },
   hint: {
     marginTop: 4,

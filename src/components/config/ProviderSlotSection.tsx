@@ -54,6 +54,7 @@ import {
 } from '../../constants/modelCapabilities';
 import {
   getProviderFieldsForModule,
+  getProviderModelFieldKey,
   LLM_CHAT_MODULES,
 } from '../../constants/providerFieldSchemas';
 import type { FieldDefinition } from '../../constants/providerFieldSchemas';
@@ -411,9 +412,11 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
   if (!theme) return null;
 
   const entries = liveModels ?? catalogModelsForModule(catalog[state.providerType], modelModuleType);
-  // Imagination's xAI provider stores its image model under `image_model`
-  // (never `model`), so both keys feed the model metadata lookup.
-  const currentModelId = state.capability.model ?? state.capability.image_model ?? '';
+  // The model key is provider-specific (ElevenLabs uses `model_id` /
+  // `stt_model_id`, xAI imagination uses `image_model`), so resolve it from the
+  // schema rather than assuming `model`.
+  const capabilityModelKey = getProviderModelFieldKey(state.providerType, modelModuleType);
+  const currentModelId = state.capability[capabilityModelKey] ?? '';
   const selectedModel = findModel(entries, currentModelId);
   const modelStale =
     liveModels != null && !!currentModelId && !liveModels.some((m) => m.id === currentModelId);
@@ -1087,9 +1090,7 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
   // ── Capability body: TTS gets the design's exact top-to-bottom order ──
   const renderCapabilityContent = () => {
     if (modelModuleType === 'tts') {
-      const modelField = supportedFields.find(
-        (f) => f.catalog === true || f.key === 'model' || f.key === 'image_model',
-      );
+      const modelField = supportedFields.find((f) => f.key === capabilityModelKey);
       const handled = new Set<string>();
       if (modelField) handled.add(modelField.key);
       if (isSoulTts) {
@@ -1099,8 +1100,6 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
       }
       if (isElevenLabsTts) {
         handled.add('voice_id');
-        // `model_id` is a legacy secondary id already covered by `model`.
-        handled.add('model_id');
       }
       if (isOpenAiTts) {
         handled.add('voice');

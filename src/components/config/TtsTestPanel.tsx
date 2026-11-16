@@ -123,6 +123,7 @@ import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
+import { getProviderModelFieldKey } from '../../constants/providerFieldSchemas';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from '../../services/AudioPlayer';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
@@ -498,7 +499,9 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         text: spoken,
         provider: providerType,
         provider_account_id: accountId ?? null,
-        model: capability?.model,
+        // The model id lives under the provider's own capability key
+        // (ElevenLabs: `model_id`), not necessarily `model`.
+        model: capability?.[getProviderModelFieldKey(providerType, 'tts')],
         capability_json: capability,
         voice_config_file: capability?.voice_config_file,
       });

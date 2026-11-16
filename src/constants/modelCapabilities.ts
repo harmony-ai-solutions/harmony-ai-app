@@ -21,19 +21,37 @@
 import type { ModelInfoDto } from '../services/engine/EngineApiClient';
 
 /**
- * Module type → capability/modality tag used to filter the OFFLINE catalog. The
- * STT VAD slot is intentionally absent: VAD models are live-only (the engine's
- * `module=vad` discovery), so the offline catalog offers nothing for it.
+ * Module type → the capability/modality tags accepted for the OFFLINE catalog.
+ *
+ * An ACCEPT-LIST per module (not a single tag) because the catalog's vocabulary
+ * is SEMANTIC — the engine emits `text_to_speech` / `speech_to_text`, while
+ * older rows and fixtures use the module tag (`tts` / `stt`) — so both are
+ * accepted. LLM modules accept every chat-ish semantic tag (tools, reasoning,
+ * structured output, vision, attachments) because an LLM that declares only
+ * `tools`/`vision` is still a chat model for Backend/Cognition/Movement.
+ *
+ * The STT VAD slot is intentionally absent: VAD models are live-only (the
+ * engine's `module=vad` discovery), so the offline catalog offers nothing for it
+ * and an unknown module type yields `[]`.
  */
-export const MODULE_CAPABILITY_TAGS: Record<string, string> = {
-  backend: 'chat',
-  cognition: 'chat',
-  movement: 'chat',
-  rag: 'embedding',
-  tts: 'tts',
-  stt: 'stt',
-  vision: 'vision',
-  imagination: 'image',
+const LLM_CAPABILITY_TAGS: readonly string[] = [
+  'chat',
+  'tools',
+  'reasoning',
+  'structured_output',
+  'vision',
+  'attachment',
+];
+
+export const MODULE_CAPABILITY_TAGS: Record<string, readonly string[]> = {
+  backend: LLM_CAPABILITY_TAGS,
+  cognition: LLM_CAPABILITY_TAGS,
+  movement: LLM_CAPABILITY_TAGS,
+  rag: ['embedding'],
+  tts: ['tts', 'text_to_speech'],
+  stt: ['stt', 'speech_to_text'],
+  vision: ['vision'],
+  imagination: ['image'],
 };
 
 /** The capability/modality tags a model declares (empty = undeclared). */
@@ -42,20 +60,25 @@ function declaredTags(model: ModelInfoDto): string[] {
 }
 
 /**
- * The OFFLINE catalog models applicable to a module. A model that declares NO
- * capability/modality metadata is kept (unknown ⇒ don't hide — offline-first,
- * never hide a model just because the catalog is sparse). An unknown module type
- * (e.g. the STT VAD slot) yields `[]` (live-only).
+ * The OFFLINE catalog models applicable to a module: those declaring ANY tag on
+ * the module's accept-list. A model that declares NO capability/modality
+ * metadata is kept (unknown ⇒ don't hide — offline-first, never hide a model
+ * just because the catalog is sparse). An unknown module type (e.g. the STT VAD
+ * slot) yields `[]` (live-only).
  */
 export function catalogModelsForModule(
   models: ModelInfoDto[] | null | undefined,
   moduleType: string,
 ): ModelInfoDto[] {
-  const tag = MODULE_CAPABILITY_TAGS[moduleType];
-  if (!tag) return [];
+  // `Array.isArray` (not truthiness) also rejects inherited Object.prototype
+  // keys for a hostile module type like `constructor`.
+  const accepted = Object.prototype.hasOwnProperty.call(MODULE_CAPABILITY_TAGS, moduleType)
+    ? MODULE_CAPABILITY_TAGS[moduleType]
+    : undefined;
+  if (!Array.isArray(accepted) || accepted.length === 0) return [];
   return (models ?? []).filter((model) => {
     const tags = declaredTags(model);
-    return tags.length === 0 || tags.includes(tag);
+    return tags.length === 0 || tags.some((tag) => accepted.includes(tag));
   });
 }
 

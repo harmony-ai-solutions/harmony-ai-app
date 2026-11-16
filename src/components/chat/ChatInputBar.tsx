@@ -9,7 +9,6 @@ import {
   Animated,
   Image,
   Keyboard,
-  Platform,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -24,6 +23,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useBiometricLock } from '../../contexts/BiometricLockContext';
 import { useToast } from '../../contexts/AppToastContext';
 import { useAppAlert } from '../../contexts/AppAlertContext';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import EmojiPickerInline from '../emoji/EmojiPickerInline';
@@ -133,7 +133,9 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   const [selectedImages, setSelectedImages] = useState<PickedImage[]>([]);
   const [isPickingImages, setIsPickingImages] = useState(false);
   const [isSendingImages, setIsSendingImages] = useState(false);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  // The composer bar floats above the IME; the shared hook tracks the height
+  // (Android edge-to-edge: adjustResize does not fire).
+  const keyboardOffset = useKeyboardHeight();
 
   // ── Recording state ──────────────────────────────────────────────────────
   const [isRecording, setIsRecording] = useState(false);
@@ -184,30 +186,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     waveformAnim.setValue(0);
   }, [isRecording, pulseAnim, waveformAnim]);
 
-  // ── Keyboard inset — lift the bar above the soft keyboard on Android edge-to-edge
-  // (adjustResize doesn't fire on modern RN). A simple bottom translate keeps the bar
-  // glued just above the keyboard without double-counting the inset.
-  useEffect(() => {
-    const onShow = (e: any) => {
-      const height =
-        e?.endCoordinates?.height ??
-        (Platform.OS === 'android' ? 300 : 336);
-      setKeyboardOffset(height);
-    };
-    const onHide = () => {
-      setKeyboardOffset(0);
-    };
-
-    const subs = [
-      Keyboard.addListener('keyboardWillShow', onShow),
-      Keyboard.addListener('keyboardDidShow', onShow),
-      Keyboard.addListener('keyboardWillHide', onHide),
-      Keyboard.addListener('keyboardDidHide', onHide),
-    ];
-    return () => {
-      subs.forEach(s => s.remove());
-    };
-  }, []);
+  // ── Keyboard inset — the bar is translated by the IME height (hook above), so
+  // it stays glued just above the keyboard without double-counting the inset.
 
   const clearRecordingTimer = useCallback(() => {
     if (recordingTimerRef.current) {

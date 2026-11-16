@@ -24,7 +24,6 @@ import {
   ActivityIndicator,
   Modal,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -41,6 +40,7 @@ import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
+import { KeyboardAwareScrollView } from '../../components/themed/KeyboardAwareScrollView';
 import { TAB_BAR_CONTENT_PAD } from '../../components/navigation/GlassTabBar';
 import { AccountForm } from '../../components/providers/AccountForm';
 import { hapticLightPress } from '../../utils/haptics';
@@ -522,7 +522,7 @@ export const ProvidersScreen: React.FC = () => {
         }
       />
 
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -559,7 +559,7 @@ export const ProvidersScreen: React.FC = () => {
             </ThemedCard>
           ))
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <Modal
         visible={editor !== null}
@@ -571,7 +571,18 @@ export const ProvidersScreen: React.FC = () => {
           <View
             style={[styles.modalShell, { backgroundColor: theme.colors.background.surface }]}
           >
-            {editor && (editor.type === '' ? renderTypePicker() : renderAccountEditor(editor))}
+            {editor &&
+              (editor.type === '' ? (
+                renderTypePicker()
+              ) : (
+                <KeyboardAwareScrollView
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {renderAccountEditor(editor)}
+                </KeyboardAwareScrollView>
+              ))}
           </View>
         </View>
       </Modal>
@@ -653,6 +664,8 @@ const styles = StyleSheet.create({
     padding: 20,
     maxHeight: '85%',
   },
+  modalScroll: { flexShrink: 1 },
+  modalScrollContent: { paddingBottom: 8 },
   modalTitle: { marginBottom: 12 },
   typeRow: {
     flexDirection: 'row',

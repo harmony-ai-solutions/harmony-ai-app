@@ -28,6 +28,7 @@ export const SIMPLE_FIELD_KEYS: ReadonlySet<string> = new Set([
   'endpoint',
   'model',
   'model_id',
+  'stt_model_id',
   'image_model',
   'image_aspect_ratio',
   'aspect_ratio',

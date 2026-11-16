@@ -576,11 +576,86 @@ const providerModelsFixture: ProviderModelsResponseDto = {
   ],
 };
 
+/**
+ * `GET /api/providers/capabilities` (tier-2 catalog, phase 5-2) in the engine's
+ * REAL shape (`providers/catalog.go:CapabilitiesPayload`): `meta` snapshot
+ * metadata + `providers.<type>` slices carrying the model MAP, the canonical→wire
+ * param map and strictness. The retired `catalog` / `param_mapping` keys are
+ * deliberately absent — the app normalizes `providers` itself.
+ */
 const providerCapabilitiesFixture: ProviderCapabilitiesDto = {
-  catalog: {
-    openai: [{ id: 'gpt-4o', label: 'GPT-4o', context: 128000, source: 'catalog' }],
+  meta: {
+    source: 'soulbits-tier2',
+    license: 'CC-BY-4.0',
+    license_notice: 'Model metadata aggregated from public provider documentation.',
+    snapshot_date: '2026-11-01',
+    snapshot_etag: '"3f2c1e0d7a4b"',
+    snapshot_sha256:
+      '9f2c1e0d7a4b6c8e5f3a1b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e',
+    generator: 'harmony-link/2.4.0',
   },
-  param_mapping: { mistral: { seed: 'random_seed' } },
+  providers: {
+    openai: {
+      wire: {
+        seed: { wire: 'seed', route: 'native' },
+        max_completion_tokens: { wire: 'max_completion_tokens', route: 'native' },
+        temperature: { wire: 'temperature', route: 'native' },
+      },
+      strict: false,
+      strict_allowed: ['temperature', 'top_p'],
+      temperature_max: 2,
+      models: {
+        'gpt-4o': {
+          label: 'GPT-4o',
+          family: 'gpt-4o',
+          context: 128000,
+          output_limit: 16384,
+          modalities: ['text', 'image'],
+          capabilities: ['chat', 'tools', 'vision'],
+          param_support: ['temperature', 'max_tokens'],
+          reasoning_effort: ['low', 'medium', 'high'],
+          status: 'current',
+          source: 'curated',
+        },
+      },
+    },
+    mistral: {
+      wire: {
+        // `extra` folds into the provider's extra params; `drop` has no wire
+        // name (never forwarded) — the app must omit dropped routes.
+        seed: { wire: 'random_seed', route: 'extra' },
+        presence_penalty: { wire: '', route: 'drop' },
+      },
+      strict: true,
+      models: {
+        'mistral-large': {
+          label: 'Mistral Large',
+          context: 131072,
+          modalities: ['text'],
+          capabilities: ['chat'],
+          status: 'current',
+          source: 'tier2',
+        },
+      },
+    },
+    soulbitscloud: {
+      models: {
+        chatterbox: {
+          label: 'Chatterbox',
+          family: 'chatterbox',
+          modalities: ['text', 'audio'],
+          capabilities: ['text_to_speech'],
+          speech_options: {
+            operation_modes: ['single_speaker_tts', 'voice_cloning'],
+            supports_voice_cloning: true,
+            languages: ['en'],
+          },
+          status: 'current',
+          source: 'curated',
+        },
+      },
+    },
+  },
 };
 
 const characterStatsFixture: CharacterStatsResponseDto = {

@@ -10,7 +10,6 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
-  Keyboard,
   Platform,
   ToastAndroid,
   NativeScrollEvent,
@@ -76,6 +75,7 @@ import { getUserPersona } from '../database/repositories';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { ImageViewerModal } from '../components/modals/ImageViewerModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import ChatBackgroundService from '../services/ChatBackgroundService';
 import { createLogger } from '../utils/logger';
@@ -552,41 +552,29 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [headerName, setHeaderName] = useState<string>('Chat');
 
   // ── Keyboard — keep the last messages visible & scrollable above the IME ──
-  // The input bar lifts itself above the keyboard (ChatInputBar translateY),
-  // so the message list must shrink by the same amount. Adding the keyboard
-  // height as bottom padding to the list's content makes the newest messages
-  // scroll into the space above the keyboard instead of being covered.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // The input bar lifts itself above the keyboard (ChatInputBar translateY) by
+  // the same shared height, so the message list must move with it. Translating
+  // the list (instead of shrinking it) keeps the full scroll range and keeps its
+  // bottom aligned with the input bar top.
+  const keyboardHeight = useKeyboardHeight();
   // True while the soft keyboard is up. Used to re-scroll after the keyboard
   // padding applies so a just-sent message is never left behind the keyboard.
   const keyboardVisibleRef = useRef(false);
+  // The first run reports height 0 for a hidden keyboard — don't scroll on mount
+  // (initial positioning is owned by the message-load effects).
+  const keyboardEffectMountedRef = useRef(false);
   useEffect(() => {
-    const onShow = (e: any) => {
-      const height =
-        e?.endCoordinates?.height ?? (Platform.OS === 'android' ? 300 : 336);
-      keyboardVisibleRef.current = true;
-      setKeyboardHeight(height);
-      // Reveal the latest message above the keyboard.
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      });
-    };
-    const onHide = () => {
-      keyboardVisibleRef.current = false;
-      setKeyboardHeight(0);
-      // Return to the true bottom once the keyboard is gone.
+    if (!keyboardEffectMountedRef.current) {
+      keyboardEffectMountedRef.current = true;
+      return;
+    }
+    keyboardVisibleRef.current = keyboardHeight > 0;
+    // Reveal the latest message above the keyboard (show) / return to the true
+    // bottom (hide).
+    requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
-    };
-    const subs = [
-      Keyboard.addListener('keyboardWillShow', onShow),
-      Keyboard.addListener('keyboardDidShow', onShow),
-      Keyboard.addListener('keyboardWillHide', onHide),
-      Keyboard.addListener('keyboardDidHide', onHide),
-    ];
-    return () => {
-      subs.forEach(s => s.remove());
-    };
-  }, []);
+    });
+  }, [keyboardHeight]);
 
   // Derive participantKey if not provided (for group chats or new)
   useEffect(() => {

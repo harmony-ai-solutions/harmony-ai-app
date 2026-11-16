@@ -8,7 +8,6 @@ import {
   View,
   Text,
   TextInput,
-  ScrollView,
   StyleSheet,
   Pressable,
   ActivityIndicator,
@@ -25,6 +24,7 @@ import { useToast } from '../contexts/AppToastContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { KeyboardAwareScrollView } from '../components/themed/KeyboardAwareScrollView';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { hexToRgba } from '../utils/colorUtils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -270,7 +270,7 @@ export const MarketplacePublishScreen: React.FC = () => {
   const inputBg = hexToRgba(baseHex, 0.55);
 
   const renderTypeStep = () => (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
+    <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
       <Text style={[styles.stepTitle, { color: theme.colors.text.primary }]}>
         {t('sellStepType')}
       </Text>
@@ -291,14 +291,14 @@ export const MarketplacePublishScreen: React.FC = () => {
           </Pressable>
         ))}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 
   const renderSourceStep = () => {
     if (itemType === 'character' || editableTextType) {
       if (characters.length === 0 && editableTextType) {
         return (
-          <ScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
+          <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
             <Text style={[styles.stepTitle, { color: theme.colors.text.primary }]}>
               {t('sellStepSource')}
             </Text>
@@ -325,11 +325,11 @@ export const MarketplacePublishScreen: React.FC = () => {
                 {t('noCharactersHint')}
               </Text>
             )}
-          </ScrollView>
+          </KeyboardAwareScrollView>
         );
       }
       return (
-        <ScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
+        <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
           <Text style={[styles.stepTitle, { color: theme.colors.text.primary }]}>
             {t('sellStepSource')}
           </Text>
@@ -369,24 +369,24 @@ export const MarketplacePublishScreen: React.FC = () => {
               )}
             </>
           )}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       );
     }
     // theme & other — placeholder
     return (
-      <ScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
+      <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
         <Text style={[styles.stepTitle, { color: theme.colors.text.primary }]}>
           {t('sellStepSource')}
         </Text>
         <Text style={[styles.hint, { color: theme.colors.text.muted }]}>
           {t('noCharactersHint')}
         </Text>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     );
   };
 
   const renderDetailsStep = () => (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
+    <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
       <Text style={[styles.stepTitle, { color: theme.colors.text.primary }]}>
         {t('sellStepDetails')}
       </Text>
@@ -442,11 +442,11 @@ export const MarketplacePublishScreen: React.FC = () => {
           </View>
         </View>
       </Pressable>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 
   const renderPreviewStep = () => (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
+    <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.stepContent}>
       <Text style={[styles.stepTitle, { color: theme.colors.text.primary }]}>
         {t('sellStepPreview')}
       </Text>
@@ -540,7 +540,7 @@ export const MarketplacePublishScreen: React.FC = () => {
           if (n > 0) setIsFree(false);
         }}
       />
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 
   const canContinue =
@@ -560,7 +560,7 @@ export const MarketplacePublishScreen: React.FC = () => {
 
   // ── EDIT MODE: a single scrollable form (details + photo + price + Save) ──
   const renderEditForm = () => (
-    <ScrollView style={styles.flex} contentContainerStyle={[styles.stepContent, { paddingBottom: safeBottom + 140 }]}>
+    <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={[styles.stepContent, { paddingBottom: safeBottom + 140 }]}>
       <Text style={[styles.stepTitle, { color: theme.colors.text.primary }]}>
         {t('sellStepDetails')}
       </Text>
@@ -641,7 +641,7 @@ export const MarketplacePublishScreen: React.FC = () => {
           </Pressable>
         </View>
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 
   return (

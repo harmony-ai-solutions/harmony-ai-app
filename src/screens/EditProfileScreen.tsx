@@ -15,7 +15,6 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   TextInput,
   KeyboardAvoidingView,
   Platform,
@@ -33,6 +32,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { KeyboardAwareScrollView } from '../components/themed/KeyboardAwareScrollView';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import AuthService from '../services/auth/AuthService';
 import ProfileExtrasService from '../services/profile/ProfileExtrasService';
@@ -172,7 +172,7 @@ export const EditProfileScreen: React.FC = () => {
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
+        <KeyboardAwareScrollView
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -281,7 +281,7 @@ export const EditProfileScreen: React.FC = () => {
             style={styles.saveButton}
             testID="save-profile-button"
           />
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
   );
