@@ -16,6 +16,14 @@ export interface CharacterProfile {
   description: string;
   personality: string;
   voice_characteristics: string;
+  /**
+   * Engine-derived vocal expressiveness (`subdued|natural|expressive`).
+   * READ-ONLY in the app — the engine derives it from the personality and
+   * gates prompt tag vocabulary by it (tts-voice-ux Phase 5 display). Optional
+   * so existing construction sites stay valid; every engine-mapped profile
+   * carries it (blank ⇒ `natural`).
+   */
+  vocal_expressiveness?: string;
   base_prompt: string;
   scenario: string;
   typing_speed_wpm: number;

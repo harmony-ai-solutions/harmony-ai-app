@@ -109,6 +109,11 @@ function catalogModelToModelInfo(id: string, dto: CatalogModelDto | null | undef
   if (dto.speech_options && typeof dto.speech_options === 'object') {
     meta.speech_options = dto.speech_options;
   }
+  // Kinded audio-tag capabilities (tts-voice-ux Phase 1). Only present for the
+  // models the engine seeds tags for, so an absent block adds no key.
+  if (dto.audio_tags && typeof dto.audio_tags === 'object') {
+    meta.audio_tags = dto.audio_tags;
+  }
   if (dto.status) meta.status = dto.status;
   if (dto.family) meta.family = dto.family;
   const reasoningEffort = nonEmpty(dto.reasoning_effort);

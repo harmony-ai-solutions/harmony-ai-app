@@ -61,6 +61,7 @@ import EntitySessionService from '../../services/EntitySessionService';
 import { getLockedEntityIds } from '../../services/variant/entityAccess';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { hexToRgba } from '../../utils/colorUtils';
+import { getShowEmotionState, setShowEmotionState } from '../../utils/chatDisplayPrefs';
 
 const log = createLogger('[ArchivedChatsScreen]');
 
@@ -106,6 +107,8 @@ export const ArchivedChatsScreen: React.FC = () => {
   const [menuItem, setMenuItem] = useState<ArchivedItem | null>(null);
   // A6 reply pacing for the conversation whose menu is open.
   const [menuReplyMode, setMenuReplyMode] = useState<ChatReplyMode>('realistic');
+  // tts-voice-ux Phase 5: per-conversation "Show emotional state" parity toggle.
+  const [menuEmotionStateVisible, setMenuEmotionStateVisible] = useState(false);
   // Guards the async reply-mode load: only apply if the same conversation is
   // still the one whose menu is open.
   const menuItemKeyRef = useRef<string | null>(null);
@@ -120,6 +123,13 @@ export const ArchivedChatsScreen: React.FC = () => {
     menuItemKeyRef.current = item.participantKey;
     setMenuReplyMode('realistic');
     setMenuItem(item);
+    // tts-voice-ux Phase 5: optimistic default, then the persisted app-local pref.
+    setMenuEmotionStateVisible(false);
+    getShowEmotionState(item.participantKey).then(visible => {
+      if (menuItemKeyRef.current === item.participantKey) {
+        setMenuEmotionStateVisible(visible);
+      }
+    });
     // 4-4 (A6): read the SYNCED reply pacing from the settings column.
     getReplyMode(item.participantKey).then(mode => {
       if (menuItemKeyRef.current === item.participantKey) {
@@ -301,6 +311,15 @@ export const ArchivedChatsScreen: React.FC = () => {
       // ignore — storage failure shouldn't block the menu
     }
   }, [menuItem, menuReplyMode, showToast, t]);
+
+  // tts-voice-ux Phase 5 — "Show emotional state" parity toggle (app-local pref).
+  const handleToggleEmotionState = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    const next = !menuEmotionStateVisible;
+    setMenuEmotionStateVisible(next);
+    await setShowEmotionState(item.participantKey, next);
+  }, [menuItem, menuEmotionStateVisible]);
 
   const handleOpenBubble = useCallback(async () => {
     const item = menuItem;
@@ -487,6 +506,8 @@ export const ArchivedChatsScreen: React.FC = () => {
         onToggleRead={handleToggleRead}
         onToggleDisable={handleToggleDisable}
         onToggleReplyMode={handleToggleReplyMode}
+        emotionStateVisible={menuEmotionStateVisible}
+        onToggleEmotionState={handleToggleEmotionState}
         onDelete={handleDelete}
       />
     </ThemedView>

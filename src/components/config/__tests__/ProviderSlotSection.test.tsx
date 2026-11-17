@@ -22,6 +22,8 @@ import { ProviderSlotSection } from '../ProviderSlotSection';
 import type { ModelInfoDto } from '../../../services/engine/EngineApiClient';
 
 let mockCatalog: Record<string, ModelInfoDto[]> = {};
+/** Live discovery descriptors (null = not fetched), driven per test. */
+let mockLiveModels: ModelInfoDto[] | null = null;
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -94,7 +96,7 @@ jest.mock('../../../hooks/useProviderCapabilityCatalog', () => ({
 // Live discovery is irrelevant here: these cases drive the offline catalog.
 jest.mock('../../../hooks/useProviderModels', () => ({
   useProviderModels: () => ({
-    models: null,
+    models: mockLiveModels,
     voices: null,
     fetching: false,
     error: null,
@@ -145,16 +147,49 @@ const ttsModel = (id: string, speechOptions?: Record<string, unknown>): ModelInf
   ...(speechOptions ? { meta: { speech_options: speechOptions } } : {}),
 });
 
-async function renderSlot(model: ModelInfoDto | undefined, capability: Record<string, any>) {
-  mockCatalog = { soulbitscloud: model ? [model] : [] };
+/** A catalog row carrying arbitrary `meta` (speech_options + audio_tags). */
+const ttsModelWithMeta = (id: string, meta: Record<string, unknown>): ModelInfoDto => ({
+  id,
+  label: id,
+  capabilities: ['tts'],
+  meta,
+});
+
+/** `count` bracket-free vocabulary words (the engine's wire shape). */
+const words = (prefix: string, count: number): string[] =>
+  Array.from({ length: count }, (_, i) => `${prefix}${i + 1}`);
+
+/** Eleven v3/v4: open cues 12 / tones 48 / breaks 3. */
+const ELEVEN_OPEN_TAGS = {
+  syntax: '[{}]',
+  cues: { mode: 'open', vocabulary: words('cue', 12) },
+  tones: { mode: 'open', vocabulary: words('tone', 48) },
+  breaks: { mode: 'open', vocabulary: words('break', 3) },
+};
+
+/** Chatterbox Turbo: CLOSED cues 9 / tones 10, no breaks block. */
+const CHATTERBOX_TURBO_TAGS = {
+  syntax: '[{}]',
+  cues: { mode: 'closed', vocabulary: words('cue', 9) },
+  tones: { mode: 'closed', vocabulary: words('tone', 10) },
+};
+
+async function renderSlot(
+  model: ModelInfoDto | undefined,
+  capability: Record<string, any>,
+  providerType: 'soulbitscloud' | 'elevenlabs' = 'soulbitscloud',
+  liveModels: ModelInfoDto[] | null = null,
+) {
+  mockCatalog = { [providerType]: model ? [model] : [] };
+  mockLiveModels = liveModels;
   const onCapabilityChange = jest.fn();
   const utils = await render(
     <ProviderSlotSection
       slot="provider"
       slotLabel=""
       modelModuleType="tts"
-      providerOptions={[{ id: 'soulbitscloud', name: 'Soulbits Cloud', icon: 'cloud' }]}
-      state={{ providerType: 'soulbitscloud', accountId: null, capability }}
+      providerOptions={[{ id: providerType, name: providerType, icon: 'cloud' }]}
+      state={{ providerType, accountId: null, capability }}
       accounts={[]}
       showAdvanced={false}
       explicitFields={{}}
@@ -388,5 +423,226 @@ describe('ProviderSlotSection — ElevenLabs model key', () => {
 
     fireEvent.press(utils.getByTestId('catalog-model-select-pick'));
     expect(onCapabilityChange).toHaveBeenCalledWith('stt_model_id', 'custom-model');
+  });
+});
+
+describe('ProviderSlotSection — Voice expression (kinded audio tags)', () => {
+  it('shows three OPEN kind cards with their vocabulary counts (Eleven v3)', async () => {
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('eleven_v3', {
+        speech_options: { supported_generation_params: ['stability'] },
+        audio_tags: ELEVEN_OPEN_TAGS,
+      }),
+      { model_id: 'eleven_v3' },
+      'elevenlabs',
+    );
+
+    const cues = utils.getByTestId('tts-tag-kind-provider-cues');
+    const tones = utils.getByTestId('tts-tag-kind-provider-tones');
+    const breaks = utils.getByTestId('tts-tag-kind-provider-breaks');
+
+    expect(within(cues).getByText('tagKindCues · 12')).toBeTruthy();
+    expect(within(tones).getByText('tagKindTones · 48')).toBeTruthy();
+    expect(within(breaks).getByText('tagKindBreaks · 3')).toBeTruthy();
+    // Mode badges: every kind is `open`.
+    expect(within(cues).getAllByText('tagModeOpen')).toHaveLength(1);
+    expect(within(tones).getAllByText('tagModeOpen')).toHaveLength(1);
+    expect(within(breaks).getAllByText('tagModeOpen')).toHaveLength(1);
+    // The accessibility label carries kind + mode + count.
+    expect(cues.props.accessibilityLabel).toBe('tagKindCues, tagModeOpen, 12');
+
+    // Asterisk dialect hint, no legacy row, no stale Chatterbox pills.
+    expect(utils.getByText('audioTagsBoundaryHint')).toBeTruthy();
+    expect(utils.queryByTestId('tts-legacy-audio-tags-provider')).toBeNull();
+    expect(utils.queryByTestId('tts-no-audio-tags')).toBeNull();
+    expect(utils.queryByText('Paralinguistic Tags (supported inline in utterances)')).toBeNull();
+  });
+
+  it('shows CLOSED kind cards without a breaks card (Chatterbox Turbo)', async () => {
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('chatterbox_turbo', {
+        speech_options: { supported_generation_params: ['temperature'] },
+        audio_tags: CHATTERBOX_TURBO_TAGS,
+      }),
+      { model: 'chatterbox_turbo' },
+    );
+
+    const cues = utils.getByTestId('tts-tag-kind-provider-cues');
+    expect(within(cues).getByText('tagKindCues · 9')).toBeTruthy();
+    expect(within(cues).getByText('tagModeClosed')).toBeTruthy();
+    expect(within(utils.getByTestId('tts-tag-kind-provider-tones')).getByText('tagKindTones · 10')).toBeTruthy();
+    // Breaks are absent from the block → no card, and no invented one.
+    expect(utils.queryByTestId('tts-tag-kind-provider-breaks')).toBeNull();
+  });
+
+  it('shows the none-state for a tag-free model (chatterbox_multilingual)', async () => {
+    const { utils } = await renderSlot(
+      ttsModel('chatterbox_multilingual', {
+        supports_voice_cloning: true,
+        supported_generation_params: ['exaggeration', 'cfg_weight'],
+        languages: [{ code: 'en', name: 'en' }],
+      }),
+      { model: 'chatterbox_multilingual', voice: '', language: 'en' },
+    );
+
+    expect(utils.getByTestId('tts-no-audio-tags')).toBeTruthy();
+    expect(utils.getByText('audioTagsNoneHint')).toBeTruthy();
+    // No fabricated kinds and no stale 5-tag pill list.
+    expect(utils.queryByTestId('tts-tag-kind-provider-cues')).toBeNull();
+    expect(utils.queryByText('[laughter]')).toBeNull();
+  });
+
+  it('warns that Eleven v2 models read delivery guides ALOUD', async () => {
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('eleven_multilingual_v2', {
+        speech_options: { supported_generation_params: ['stability'] },
+      }),
+      { model_id: 'eleven_multilingual_v2', voice_id: '' },
+      'elevenlabs',
+    );
+
+    expect(utils.getByTestId('tts-no-audio-tags')).toBeTruthy();
+    expect(utils.getByTestId('tts-audio-tags-v2-warning-provider')).toBeTruthy();
+    expect(utils.getByText('audioTagsV2Warning')).toBeTruthy();
+  });
+
+  it('shows ONE legacy row for an old engine (flat tags, no kinds)', async () => {
+    const { utils } = await renderSlot(
+      ttsModel('chatterbox_turbo', {
+        supported_generation_params: ['temperature'],
+        paralinguistic_tags: ['[laugh]', '[sigh]', '[cough]'],
+      }),
+      { model: 'chatterbox_turbo' },
+    );
+
+    expect(utils.getByTestId('tts-legacy-audio-tags-provider')).toBeTruthy();
+    expect(utils.getByText('audioTagsLegacyHint')).toBeTruthy();
+    // No kind is fabricated from a flat list.
+    expect(utils.queryByTestId('tts-tag-kind-provider-cues')).toBeNull();
+    expect(utils.queryByTestId('tts-no-audio-tags')).toBeNull();
+  });
+
+  it('resolves the kinds from the catalog even when the live descriptor lacks them', async () => {
+    // Live discovery descriptors carry only speech_options, never audio_tags.
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('eleven_v3', {
+        speech_options: { supported_generation_params: ['stability'] },
+        audio_tags: ELEVEN_OPEN_TAGS,
+      }),
+      { model_id: 'eleven_v3' },
+      'elevenlabs',
+      [{ id: 'eleven_v3', label: 'Eleven v3', capabilities: ['tts'] }],
+    );
+
+    expect(utils.getByTestId('tts-tag-kind-provider-cues')).toBeTruthy();
+    expect(within(utils.getByTestId('tts-tag-kind-provider-tones')).getByText('tagKindTones · 48')).toBeTruthy();
+  });
+});
+
+describe('ProviderSlotSection — Accent (ElevenLabs v3/v4 only)', () => {
+  const EL_V3_SPEECH = {
+    supported_generation_params: ['stability'],
+    accents: ['British accent', 'American accent', 'Australian accent'],
+  };
+
+  it('offers the engine-seeded accents and writes capability.accent', async () => {
+    const { utils, onCapabilityChange } = await renderSlot(
+      ttsModelWithMeta('eleven_v3', {
+        speech_options: EL_V3_SPEECH,
+        audio_tags: ELEVEN_OPEN_TAGS,
+      }),
+      { model_id: 'eleven_v3', voice_id: '', accent: '' },
+      'elevenlabs',
+    );
+
+    expect(utils.getByTestId('tts-accent-picker-provider')).toBeTruthy();
+    // The picker shows the plain word — never a bracketed tag.
+    expect(utils.getByText('accentBoundaryHint')).toBeTruthy();
+
+    await fireEvent.press(utils.getByLabelText('accent'));
+    await fireEvent.press(utils.getByText('British accent'));
+
+    expect(onCapabilityChange).toHaveBeenCalledWith('accent', 'British accent');
+  });
+
+  it('keeps a saved accent that the declared list omits visible as-is', async () => {
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('eleven_v3', {
+        speech_options: EL_V3_SPEECH,
+        audio_tags: ELEVEN_OPEN_TAGS,
+      }),
+      { model_id: 'eleven_v3', voice_id: '', accent: 'Kiwi accent' },
+      'elevenlabs',
+    );
+
+    expect(within(utils.getByTestId('tts-accent-picker-provider')).getByText('Kiwi accent')).toBeTruthy();
+  });
+
+  it('falls back to the tier-2 catalog row when the live descriptor has no accents', async () => {
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('eleven_v4', {
+        speech_options: { ...EL_V3_SPEECH, supported_generation_params: ['stability'] },
+        audio_tags: ELEVEN_OPEN_TAGS,
+      }),
+      { model_id: 'eleven_v4', voice_id: '', accent: '' },
+      'elevenlabs',
+      [
+        {
+          id: 'eleven_v4',
+          label: 'Eleven v4',
+          capabilities: ['tts'],
+          meta: { speech_options: { supported_generation_params: ['stability'] } },
+        },
+      ],
+    );
+
+    expect(utils.getByTestId('tts-accent-picker-provider')).toBeTruthy();
+  });
+
+  it('never offers an accent on the tag-free v2 family', async () => {
+    for (const modelId of ['eleven_multilingual_v2', 'eleven_turbo_v2_5']) {
+      const { utils } = await renderSlot(
+        ttsModelWithMeta(modelId, {
+          // Even with an accents list declared, a tag-free model must not get
+          // the picker — the tag would be SPOKEN ALOUD.
+          speech_options: { supported_generation_params: ['stability'], accents: ['British accent'] },
+        }),
+        { model_id: modelId, voice_id: '', accent: '' },
+        'elevenlabs',
+      );
+
+      expect(utils.queryByTestId('tts-accent-picker-provider')).toBeNull();
+      expect(utils.queryByLabelText('accent')).toBeNull();
+      await cleanup();
+    }
+  });
+
+  it('shows a locked hint for a stored accent on a tag-free model', async () => {
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('eleven_multilingual_v2', {
+        speech_options: { supported_generation_params: ['stability'], accents: ['British accent'] },
+      }),
+      { model_id: 'eleven_multilingual_v2', voice_id: '', accent: 'British accent' },
+      'elevenlabs',
+    );
+
+    expect(utils.getByTestId('tts-accent-locked-provider')).toBeTruthy();
+    expect(utils.getByText('accentLocked')).toBeTruthy();
+    expect(utils.queryByTestId('tts-accent-picker-provider')).toBeNull();
+  });
+
+  it('shows no accent row at all when the model declares no accent list', async () => {
+    const { utils } = await renderSlot(
+      ttsModelWithMeta('eleven_v3', {
+        speech_options: { supported_generation_params: ['stability'] },
+        audio_tags: ELEVEN_OPEN_TAGS,
+      }),
+      { model_id: 'eleven_v3', voice_id: '', accent: '' },
+      'elevenlabs',
+    );
+
+    expect(utils.getByTestId('tts-accent-none-provider')).toBeTruthy();
+    expect(utils.getByText('accentNoneHint')).toBeTruthy();
+    expect(utils.queryByLabelText('accent')).toBeNull();
   });
 });

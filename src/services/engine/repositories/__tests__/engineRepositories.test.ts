@@ -20,6 +20,7 @@ import * as entitiesRepo from '../entities';
 import * as providersRepo from '../providers';
 import * as modulesRepo from '../modules';
 import * as userEntitiesRepo from '../userEntities';
+import * as ragRepo from '../ragCollections';
 
 const CONN = {
   wsPort: 1,
@@ -1793,10 +1794,84 @@ describe('emoji_actions adapter', () => {
 describe('emotion_state adapter', () => {
   it('returns null when the engine has no live state', async () => {
     const server = createMockManagementServer([
-      { method: 'GET', path: /emotion/, json: { emotion_state: null } },
+      { method: 'GET', path: /emotion/, json: { emotion_state: null, emotion_derived: null } },
     ]);
     install(server);
     await expect(emotionRepo.getEmotionState('e1')).resolves.toBeNull();
+    await expect(emotionRepo.getEmotionSnapshot('e1')).resolves.toEqual({
+      state: null,
+      derived: null,
+    });
+  });
+
+  it('reads the state + derived view in ONE request', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: /emotion/,
+        json: {
+          emotion_state: { entity_id: 'e1', joy_intensity: 9.4, last_update: '2026-11-17T14:32:00Z' },
+          emotion_derived: {
+            dominant_emotion: 'joy',
+            dominant_intensity: 9.4,
+            intensity_label: 'overwhelming',
+            intensity_labels: { joy: 'overwhelming', sadness: 'neutral' },
+            active_dyads: [
+              {
+                keyword: 'affection',
+                type: 'primary',
+                source_emotions: ['joy', 'trust'],
+                source_intensities: [9.4, 6.2],
+                combined_intensity: 15.6,
+                description: 'a warm sense of affection blooms in your heart',
+              },
+            ],
+            top_emotions: [{ emotion: 'joy', intensity: 9.4, label: 'overwhelming' }],
+          },
+        },
+      },
+    ]);
+    install(server);
+    const snapshot = await emotionRepo.getEmotionSnapshot('e1');
+    expect(server.calls).toHaveLength(1);
+    expect(server.calls[0].path).toBe('/api/entities/e1/emotion');
+    expect(snapshot.state?.joy_intensity).toBe(9.4);
+    expect(snapshot.state?.last_update).toBeInstanceOf(Date);
+    expect(snapshot.derived?.dominantEmotion).toBe('joy');
+    expect(snapshot.derived?.intensityLabel).toBe('overwhelming');
+    expect(snapshot.derived?.activeDyads[0].combinedIntensity).toBe(15.6);
+    expect(snapshot.derived?.topEmotions).toHaveLength(1);
+  });
+
+  it('getEmotionState stays a thin vector-only wrapper (one request)', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: /emotion/,
+        json: {
+          emotion_state: { entity_id: 'e1', joy_intensity: 2.5 },
+          emotion_derived: { dominant_emotion: 'joy', dominant_intensity: 2.5 },
+        },
+      },
+    ]);
+    install(server);
+    const state = await emotionRepo.getEmotionState('e1');
+    expect(state?.joy_intensity).toBe(2.5);
+    expect(server.calls).toHaveLength(1);
+  });
+
+  it('degrades derived to null when an older engine omits emotion_derived', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: /emotion/,
+        json: { emotion_state: { entity_id: 'e1', joy_intensity: 1.2 } },
+      },
+    ]);
+    install(server);
+    const snapshot = await emotionRepo.getEmotionSnapshot('e1');
+    expect(snapshot.state?.joy_intensity).toBe(1.2);
+    expect(snapshot.derived).toBeNull();
   });
 });
 
@@ -1853,5 +1928,126 @@ describe('memories adapter', () => {
     install(server);
     const mems = await memoriesRepo.getMemoriesForEntity('e1');
     expect(mems.map(m => m.id)).toEqual(['mem1', 'mem2']);
+  });
+});
+
+describe('ragCollections adapter (tts-voice-ux Phase 6)', () => {
+  const collection = {
+    name: 'lore',
+    documentCount: 2,
+    lastUpdated: '2026-11-16T09:00:00Z',
+    embeddingDim: 1536,
+  };
+  const document = {
+    id: 'doc-1',
+    content: 'The lighthouse keeper watches the harbor.',
+    metadata: { source: 'manual' },
+    archetype: 'character',
+    category: 'bio',
+    name: 'The lighthouse keeper',
+    createdAt: '2026-11-16T09:00:00Z',
+  };
+
+  it('lists collections (empty when the engine sends none)', async () => {
+    const server = createMockManagementServer([
+      { method: 'GET', path: '/api/entities/e1/rag/collections', json: { collections: [collection] } },
+    ]);
+    install(server);
+    const list = await ragRepo.listRagCollections('e1');
+    expect(list.map(c => c.name)).toEqual(['lore']);
+    expect(list[0].documentCount).toBe(2);
+
+    const emptyServer = createMockManagementServer([
+      { method: 'GET', path: '/api/entities/e1/rag/collections', json: {} },
+    ]);
+    install(emptyServer);
+    await expect(ragRepo.listRagCollections('e1')).resolves.toEqual([]);
+  });
+
+  it('reads collection info + stats', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore',
+        json: {
+          info: collection,
+          stats: {
+            name: 'lore',
+            totalDocuments: 2,
+            archetypeBreakdown: { character: 1 },
+            categoryBreakdown: { character: { bio: 1 } },
+            nameBreakdown: {},
+            embeddingDimension: 1536,
+            lastUpdated: '2026-11-16T09:00:00Z',
+          },
+        },
+      },
+    ]);
+    install(server);
+    const { info, stats } = await ragRepo.getRagCollection('e1', 'lore');
+    expect(info?.embeddingDim).toBe(1536);
+    expect(stats?.archetypeBreakdown).toEqual({ character: 1 });
+  });
+
+  it('lists documents, forwarding only non-empty filters', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore/documents',
+        json: { documents: [document], total: 1 },
+      },
+    ]);
+    install(server);
+    const docs = await ragRepo.getRagDocuments('e1', 'lore', {
+      archetype: 'character',
+      category: '',
+    });
+    expect(docs.map(d => d.id)).toEqual(['doc-1']);
+    expect(server.lastCall('GET', /\/rag\/collections\/lore\/documents/)!.query).toEqual({
+      archetype: 'character',
+    });
+  });
+
+  it('reads one document and the grouped view', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore/documents/doc-1',
+        json: { ...document, embedding: [0.1, 0.2] },
+      },
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore/groups',
+        json: { collectionName: 'lore', groups: {}, totalDocuments: 0, supported: true },
+      },
+    ]);
+    install(server);
+    const detail = await ragRepo.getRagDocument('e1', 'lore', 'doc-1');
+    expect(detail.embedding).toEqual([0.1, 0.2]);
+    const groups = await ragRepo.getRagCollectionGroups('e1', 'lore');
+    expect(groups.collectionName).toBe('lore');
+  });
+
+  it('sends a trimmed test query with a default limit of 5', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'POST',
+        path: '/api/entities/e1/rag/collections/lore/test-query',
+        json: { query: 'who keeps the lighthouse?', results: [] },
+      },
+    ]);
+    install(server);
+    await ragRepo.testRagQuery('e1', 'lore', '  who keeps the lighthouse?  ');
+    const call = server.lastCall('POST', '/api/entities/e1/rag/collections/lore/test-query')!;
+    expect(call.body).toEqual({ query: 'who keeps the lighthouse?', limit: 5 });
+  });
+
+  it('never sends an empty test query', async () => {
+    const server = createMockManagementServer([]);
+    install(server);
+    await expect(ragRepo.testRagQuery('e1', 'lore', '   ')).rejects.toThrow(
+      'RAG test query must not be empty',
+    );
+    expect(server.calls).toHaveLength(0);
   });
 });

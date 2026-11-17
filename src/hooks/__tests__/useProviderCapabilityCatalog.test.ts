@@ -247,3 +247,51 @@ describe('useProviderCapabilityCatalog — legacy payload fallback', () => {
     expect(result.current.paramMapping).toEqual({});
   });
 });
+
+describe('useProviderCapabilityCatalog — kinded audio tags (tts-voice-ux Phase 1)', () => {
+  const AUDIO_TAGS = {
+    syntax: '[{}]',
+    cues: { mode: 'open', vocabulary: ['laughs', 'sighs'] },
+    tones: { mode: 'open', vocabulary: ['whispers'] },
+    breaks: { mode: 'open', vocabulary: ['pause'] },
+  };
+
+  it('copies audio_tags into meta.audio_tags only when present', async () => {
+    getProviderCapabilities.mockResolvedValue({
+      providers: {
+        elevenlabs: {
+          models: {
+            eleven_v3: {
+              label: 'Eleven v3',
+              capabilities: ['text_to_speech'],
+              audio_tags: AUDIO_TAGS,
+              status: 'current',
+            },
+            eleven_multilingual_v2: {
+              label: 'Eleven Multilingual v2',
+              capabilities: ['text_to_speech'],
+              status: 'current',
+            },
+          },
+        },
+      },
+    } satisfies ProviderCapabilitiesDto);
+    const { result } = await renderHook(() => useProviderCapabilityCatalog());
+
+    await waitFor(() => expect(result.current.catalog.elevenlabs).toHaveLength(2));
+    const tagged = result.current.catalog.elevenlabs.find((m) => m.id === 'eleven_v3')!;
+    expect(tagged.meta?.audio_tags).toEqual(AUDIO_TAGS);
+    // The block survives normalization verbatim (no key renaming/reshaping).
+    expect(Object.keys(tagged.meta?.audio_tags as object)).toEqual([
+      'syntax',
+      'cues',
+      'tones',
+      'breaks',
+    ]);
+
+    const tagFree = result.current.catalog.elevenlabs.find(
+      (m) => m.id === 'eleven_multilingual_v2',
+    )!;
+    expect(tagFree.meta).not.toHaveProperty('audio_tags');
+  });
+});

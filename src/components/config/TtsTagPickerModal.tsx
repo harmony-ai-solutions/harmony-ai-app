@@ -1,23 +1,30 @@
 /**
- * TtsTagPickerModal — searchable list of the model's paralinguistic tags.
+ * TtsTagPickerModal — searchable list of the model's insertable tags.
  *
- * The TTS test panel shows at most `MAX_INLINE_TAGS` quick-insert chips; the
- * dashed "[+ N more]" chip opens this picker so a large tag vocabulary
- * (Chatterbox Turbo ships dozens of `[laughter]` / `[sigh]`-style tags) stays
- * reachable without flooding the text field's toolbar.
+ * The TTS test panel shows at most `MAX_INLINE_TAGS` quick-insert chips per
+ * kind; the dashed "[+ N more]" chip and the "Search all" button open this
+ * picker so a large vocabulary (Eleven v3 ships 12 cues + 48 tones + 3 breaks)
+ * stays reachable without flooding the text field's toolbar.
+ *
+ * Two shapes are accepted:
+ *  - `sections` (tts-voice-ux Phase 3): kind-grouped tags with a header per
+ *    kind (`tts-tag-section-<kind>`), optionally restricted to one kind by
+ *    `kindFilter` (the "[+ N more]" path); "Search all…" passes no filter.
+ *  - `tags` (legacy/caller convenience): one flat list, no headers.
  *
  * Conventions follow `ChatPartnerPickerModal` (the repo's picker pattern):
  * RN `Modal`, safe-area insets, a search field above a `FlatList`, a haptic on
  * row tap, `useAppTheme` colors and the shared logger. Rows are sorted
- * alphabetically (case-insensitive) and filtered live by case-insensitive
- * substring match. Tapping a row fires `onPick(tag)` — the panel appends it
- * through the exact same `insertTag` path as a chip press and closes the modal.
+ * alphabetically (case-insensitive) WITHIN each section and filtered live by
+ * case-insensitive substring match. Tapping a row fires `onPick(tag)` — the
+ * panel appends it through the exact same `insertTag` path as a chip press and
+ * closes the modal.
  *
  * It is a full-screen transparent-over-dark fade rather than a bottom sheet so
  * the keyboard never hides the search field or the results.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Keyboard,
@@ -38,14 +45,31 @@ import { paralinguisticTagSlug } from './paralinguisticTagTestIds';
 
 const log = createLogger('[TtsTagPickerModal]');
 
+/** One kind group of insertable tags (`*word*` forms). */
+export interface TtsTagPickerSection {
+  /** `cues` / `tones` / `breaks`, or `all` for a legacy flat list. */
+  kind: string;
+  label: string;
+  tags: string[];
+}
+
 export interface TtsTagPickerModalProps {
   visible: boolean;
-  /** The full tag vocabulary (the panel already trims it to the inline cap). */
-  tags: string[];
+  /** Flat tag vocabulary (`*sigh*` forms). Ignored when `sections` is given. */
+  tags?: string[];
+  /** Kind-grouped vocabulary — the Phase 3 shape. */
+  sections?: TtsTagPickerSection[];
+  /** Show only this section (`null`/absent = every section, "search all"). */
+  kindFilter?: string | null;
   onClose: () => void;
   /** Fired with the tapped tag; the parent inserts it and closes the modal. */
   onPick: (tag: string) => void;
 }
+
+/** A rendered list row: a section header or one tag. */
+type PickerRow =
+  | { type: 'header'; kind: string; label: string; count: number }
+  | { type: 'tag'; tag: string };
 
 /** Case-insensitive alphabetical order; the filter never re-orders rows. */
 function sortTags(tags: string[]): string[] {
@@ -57,6 +81,8 @@ function sortTags(tags: string[]): string[] {
 export const TtsTagPickerModal: React.FC<TtsTagPickerModalProps> = ({
   visible,
   tags,
+  sections,
+  kindFilter,
   onClose,
   onPick,
 }) => {
@@ -66,19 +92,51 @@ export const TtsTagPickerModal: React.FC<TtsTagPickerModalProps> = ({
 
   const [query, setQuery] = useState('');
 
+  /** The active groups: the kind filter narrows `sections` to one entry. */
+  const visibleSections = useMemo<TtsTagPickerSection[]>(() => {
+    if (Array.isArray(sections) && sections.length > 0) {
+      if (!kindFilter) return sections;
+      return sections.filter((section) => section.kind === kindFilter);
+    }
+    if (Array.isArray(tags) && tags.length > 0) {
+      return [{ kind: 'all', label: '', tags }];
+    }
+    return [];
+  }, [sections, tags, kindFilter]);
+
+  const totalTags = visibleSections.reduce((sum, section) => sum + section.tags.length, 0);
+
   // Fresh search on every open; drop the keyboard so the list is fully visible.
   useEffect(() => {
     if (!visible) return;
     setQuery('');
-    log.debug(`Tag picker opened (${tags.length} tags)`);
-  }, [visible, tags.length]);
+    log.debug(`Tag picker opened (${totalTags} tags)`);
+  }, [visible, totalTags]);
+
+  const rows = useMemo<PickerRow[]>(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const result: PickerRow[] = [];
+    for (const section of visibleSections) {
+      const sorted = sortTags(section.tags);
+      const matches = normalizedQuery
+        ? sorted.filter((tag) => tag.toLowerCase().includes(normalizedQuery))
+        : sorted;
+      if (matches.length === 0) continue;
+      // Flat callers (no grouped sections) keep the bare list they always had.
+      if (Array.isArray(sections) && sections.length > 0 && section.label) {
+        result.push({
+          type: 'header',
+          kind: section.kind,
+          label: section.label,
+          count: matches.length,
+        });
+      }
+      for (const tag of matches) result.push({ type: 'tag', tag });
+    }
+    return result;
+  }, [visibleSections, query, sections]);
 
   if (!theme) return null;
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredTags = normalizedQuery
-    ? sortTags(tags).filter((tag) => tag.toLowerCase().includes(normalizedQuery))
-    : sortTags(tags);
 
   const handlePick = (tag: string) => {
     hapticLightPress();
@@ -149,7 +207,9 @@ export const TtsTagPickerModal: React.FC<TtsTagPickerModalProps> = ({
             <TextInput
               testID="tts-tag-search"
               style={[styles.searchInput, { color: theme.colors.text.primary }]}
-              placeholder={t('tagSearchPlaceholder')}
+              placeholder={
+                kindFilter ? t('tagSearchPlaceholder') : t('tagSearchPlaceholderAll')
+              }
               placeholderTextColor={theme.colors.text.disabled}
               value={query}
               onChangeText={setQuery}
@@ -165,7 +225,7 @@ export const TtsTagPickerModal: React.FC<TtsTagPickerModalProps> = ({
           </View>
 
           {/* ── Tag list ── */}
-          {filteredTags.length === 0 ? (
+          {rows.length === 0 ? (
             <View style={styles.emptyWrap}>
               <ThemedText size={12} variant="muted" testID="tts-tag-empty">
                 {t('noTagMatches')}
@@ -173,26 +233,43 @@ export const TtsTagPickerModal: React.FC<TtsTagPickerModalProps> = ({
             </View>
           ) : (
             <FlatList
-              data={filteredTags}
-              keyExtractor={(tag) => tag}
+              data={rows}
+              // The vocabulary is bounded (12+48+3 on Eleven v3), so rendering
+              // every row up-front keeps the grouped headers reachable without
+              // a scroll in a short modal.
+              initialNumToRender={rows.length}
+              keyExtractor={(row) =>
+                row.type === 'header' ? `section:${row.kind}` : `tag:${row.tag}`
+              }
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.listContent}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  testID={`tts-tag-row:${paralinguisticTagSlug(item)}`}
-                  onPress={() => handlePick(item)}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Insert ${item}`}
-                  style={[styles.row, { borderBottomColor: theme.colors.border.default }]}
-                >
-                  <ThemedText size={11} style={styles.rowText}>
-                    {item}
-                  </ThemedText>
-                  <Icon name="insert" size={14} color="#94A3B8" />
-                </TouchableOpacity>
-              )}
+              renderItem={({ item }) =>
+                item.type === 'header' ? (
+                  <View
+                    testID={`tts-tag-section-${item.kind}`}
+                    style={[styles.sectionHeader, { borderBottomColor: theme.colors.border.default }]}
+                  >
+                    <ThemedText size={10.5} weight="bold" style={styles.sectionHeaderText}>
+                      {`${item.label} · ${item.count}`}
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    testID={`tts-tag-row:${paralinguisticTagSlug(item.tag)}`}
+                    onPress={() => handlePick(item.tag)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Insert ${item.tag}`}
+                    style={[styles.row, { borderBottomColor: theme.colors.border.default }]}
+                  >
+                    <ThemedText size={11} style={styles.rowText}>
+                      {item.tag}
+                    </ThemedText>
+                    <Icon name="insert" size={14} color="#94A3B8" />
+                  </TouchableOpacity>
+                )
+              }
             />
           )}
         </View>
@@ -249,6 +326,16 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 8,
+  },
+  sectionHeader: {
+    paddingTop: 10,
+    paddingBottom: 4,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sectionHeaderText: {
+    color: '#94A3B8',
+    letterSpacing: 0.4,
   },
   row: {
     flexDirection: 'row',

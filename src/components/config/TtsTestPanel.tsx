@@ -66,13 +66,27 @@
  * error (`failOnCancel: false`); real failures surface through the panel's
  * error text.
  *
- * ## Tags
+ * ## Tags (tts-voice-ux Phase 3)
  *
- * `paralinguisticTags` (e.g. Chatterbox Turbo's `[laughter]`, `[sigh]`) render
- * as quick-insert chips above the sample text. At most `MAX_INLINE_TAGS` chips
- * render inline; a dashed "[+ N more]" chip opens `TtsTagPickerModal` with the
- * searchable full list, and picking a row appends the tag through the same
- * `insertTag` path as a chip press.
+ * The insertable vocabulary is derived from the model's KINDED capabilities
+ * (`audioTags` prop → cues / tones / breaks, `mode !== 'none'`); an older
+ * engine's flat `paralinguisticTags` / `legacyTags` list is the fallback (one
+ * "All tags" section). A segmented switch picks the kind, at most
+ * `MAX_INLINE_TAGS` chips render per kind and a dashed "[+ N more]" chip opens
+ * `TtsTagPickerModal` (grouped sections, optional kind filter) — picking a row
+ * appends through the same `insertTag` path as a chip press.
+ *
+ * EVERY chip/row inserts the ASTERISK natural form (`*sighs*`), never a
+ * bracketed provider tag: brackets are a TTS-boundary syntax and the bracket-
+ * free invariant covers stored/shown chat text. The "Sent to TTS" box then
+ * shows the engine's own provider string (`res.text`, clearly labelled as
+ * provider output) plus a muted echo of `res.input_text` — display only, never
+ * persisted, never part of the replay fingerprint.
+ *
+ * `vocalize_nonverbal` (default off) and the cue-budget demo (default 3, posted
+ * as `audio_tag_budget`) both shape the engine output and therefore BOTH take
+ * part in the replay fingerprint: flipping either re-synthesizes instead of
+ * replaying stale audio.
  *
  * ## Completion classification
  *
@@ -107,10 +121,11 @@
  * is released on a genuine end (`idle`), on `error`, and on unmount.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
+  Switch,
   TextInput,
   TouchableOpacity,
   View,
@@ -144,6 +159,11 @@ import {
 } from '../../utils/audioFormat';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import {
+  AUDIO_TAG_KINDS,
+  type AudioTagCapabilities,
+  type AudioTagKind,
+} from '../../constants/modelCapabilities';
 import { TtsTagPickerModal } from './TtsTagPickerModal';
 import { paralinguisticTagTestId } from './paralinguisticTagTestIds';
 
@@ -151,13 +171,39 @@ export { paralinguisticTagTestId };
 
 const log = createLogger('[TtsTestPanel]');
 
-/** Inline chip ceiling; the rest live behind the "[+ N more]" picker chip. */
-const MAX_INLINE_TAGS = 20;
+/**
+ * Inline chip ceiling PER KIND; the rest live behind the "[+ N more]" picker
+ * chip. Cues/tones vocabularies reach 48 words on Eleven v3, so a kind-scoped
+ * switch + a small inline cap keeps the toolbar usable.
+ */
+const MAX_INLINE_TAGS = 8;
+
+/** Cue-budget demo values (`audio_tag_budget`); 3 is the engine default. */
+const CUE_BUDGET_OPTIONS = [1, 3, 5] as const;
+const DEFAULT_CUE_BUDGET = 3;
+
+/** Stable empty list (keeps the tag-section memo from re-running every render). */
+const EMPTY_TAGS: string[] = [];
+
+/** Preset sample scripts: cue + tone + break, and a narrative action. */
+const SAMPLE_SCRIPTS = [
+  { key: 'sampleScriptCue', labelKey: 'sampleScriptCue' },
+  { key: 'sampleScriptAction', labelKey: 'sampleScriptAction' },
+  { key: 'sampleScriptMixed', labelKey: 'sampleScriptMixed' },
+] as const;
 
 /** How often completion is polled while audio plays (ChatBubble parity). */
 const PROGRESS_POLL_MS = 250;
 
 type TtsPhase = 'idle' | 'synthesizing' | 'playing' | 'paused' | 'error';
+
+/** One kind group of insertable tags (`*word*` forms). */
+export interface TtsTagSection {
+  /** `cues` / `tones` / `breaks`, or `all` for the legacy flat list. */
+  kind: string;
+  label: string;
+  tags: string[];
+}
 
 /** The last synthesized sample, kept so it can be replayed and downloaded. */
 interface SynthesizedAudio {
@@ -172,8 +218,35 @@ export interface TtsTestPanelProps {
   accountId?: string | null;
   /** The live capability overlay (model, voice, cloning params, …). */
   capability?: Record<string, any>;
-  /** Model-declared paralinguistic tags for quick insertion. */
+  /**
+   * Legacy flat tag list (`[sigh]`, `[laughter]`, …) — quick-insertion
+   * fallback for engines that publish no kinded `audio_tags` block.
+   */
   paralinguisticTags?: string[];
+  /** Preferred name for the legacy flat list; wins over `paralinguisticTags`. */
+  legacyTags?: string[];
+  /**
+   * Kinded audio-tag capabilities resolved from the TIER-2 catalog
+   * (`getAudioTagCapabilities`). Drives the kinded pickers; absent ⇒ the
+   * legacy flat list (or no chips at all) is used.
+   */
+  audioTags?: AudioTagCapabilities;
+}
+
+/**
+ * A tag's ASTERISK NATURAL FORM — the only dialect stored/typed in chat text.
+ *
+ * `[clears throat]` / `clears throat` / `*clears throat*` all normalize to
+ * `*clears throat*`, so the panel never inserts a bracketed tag (brackets exist
+ * only at the TTS boundary, and the engine renders them back for display).
+ */
+function asteriskTagForm(tag: string): string {
+  const word = tag
+    .trim()
+    .replace(/^[[\]*]+/, '')
+    .replace(/[[\]*]+$/, '')
+    .trim();
+  return word === '' ? '' : `*${word}*`;
 }
 
 /** Normalize an engine `format` value into an audio mime type. */
@@ -208,20 +281,25 @@ function stableStringify(value: unknown): string {
 
 /**
  * Fingerprint of everything that shapes a synthesis run: the provider, the
- * account, and the live capability overlay. The big-button replay guard
- * compares this against the fingerprint stored with the kept sample (owner
- * report, 2026-10-21: changing the TTS voice still replayed the previous
- * voice, because the guard only compared the sample text).
+ * account, the live capability overlay AND the demo switches that change the
+ * engine's output (`vocalize_nonverbal`, `audio_tag_budget`). The big-button
+ * replay guard compares this against the fingerprint stored with the kept
+ * sample (owner report, 2026-10-21: changing the TTS voice still replayed the
+ * previous voice, because the guard only compared the sample text).
  */
 function synthesisFingerprint(input: {
   providerType?: string;
   accountId?: string | null;
   capability?: Record<string, any> | null;
+  vocalizeNonverbal?: boolean;
+  cueBudget?: number;
 }): string {
   return stableStringify({
     providerType: input.providerType ?? null,
     accountId: input.accountId ?? null,
     capability: input.capability ?? null,
+    vocalizeNonverbal: input.vocalizeNonverbal ?? false,
+    cueBudget: input.cueBudget ?? DEFAULT_CUE_BUDGET,
   });
 }
 
@@ -325,7 +403,9 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   providerType,
   accountId,
   capability,
-  paralinguisticTags = [],
+  paralinguisticTags,
+  legacyTags,
+  audioTags,
 }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('moduleConfig');
@@ -334,6 +414,21 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   const [phase, setPhase] = useState<TtsPhase>('idle');
   const [text, setText] = useState(() => t('sampleText'));
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The engine's provider-bound string (`res.text`, the `*asterisks*` →
+   * `[brackets]` translation) and the input echo (`res.input_text`). Display
+   * only: they are NEVER persisted into chat text and are excluded from the
+   * replay fingerprint.
+   */
+  const [synthText, setSynthText] = useState<string | null>(null);
+  const [inputText, setInputText] = useState<string | null>(null);
+  const [sentOpen, setSentOpen] = useState(true);
+  /** Demo switches — both shape the engine output, so both fingerprint. */
+  const [vocalizeNonverbal, setVocalizeNonverbal] = useState(false);
+  const [cueBudget, setCueBudget] = useState<number>(DEFAULT_CUE_BUDGET);
+  /** The kinded tag groups the model supports (empty ⇒ no pickers). */
+  const [activeKind, setActiveKind] = useState<string | null>(null);
+  const [pickerKind, setPickerKind] = useState<string | null>(null);
   /** The kept sample + the exact text it was synthesized from (replay guard). */
   const [lastAudio, setLastAudio] = useState<SynthesizedAudio | null>(null);
   const [lastSynthText, setLastSynthText] = useState('');
@@ -346,6 +441,50 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [tagPickerVisible, setTagPickerVisible] = useState(false);
+
+  /**
+   * The insertable tag groups, in display order.
+   *
+   * Kinded capabilities win; the LEGACY flat list is the old-engine fallback
+   * (one ungrouped section). Every tag is the ASTERISK form — brackets are a
+   * TTS-boundary syntax and must never reach the text field or chat.
+   */
+  const tagSections = useMemo<TtsTagSection[]>(() => {
+    const kindLabel = (kind: AudioTagKind): string =>
+      t(kind === 'cues' ? 'tagKindCues' : kind === 'tones' ? 'tagKindTones' : 'tagKindBreaks');
+
+    const sections: TtsTagSection[] = [];
+    if (audioTags) {
+      for (const kind of AUDIO_TAG_KINDS) {
+        const block = audioTags[kind];
+        if (!block || block.mode === 'none') continue;
+        const seen = new Set<string>();
+        const tags: string[] = [];
+        for (const word of block.vocabulary) {
+          const tag = asteriskTagForm(word);
+          if (tag === '' || seen.has(tag)) continue;
+          seen.add(tag);
+          tags.push(tag);
+        }
+        if (tags.length > 0) sections.push({ kind, label: kindLabel(kind), tags });
+      }
+    }
+    if (sections.length > 0) return sections;
+
+    const legacy = legacyTags ?? paralinguisticTags ?? EMPTY_TAGS;
+    const seen = new Set<string>();
+    const flat: string[] = [];
+    for (const raw of legacy) {
+      const tag = asteriskTagForm(raw);
+      if (tag === '' || seen.has(tag)) continue;
+      seen.add(tag);
+      flat.push(tag);
+    }
+    return flat.length > 0 ? [{ kind: 'all', label: t('tagKindAll'), tags: flat }] : [];
+  }, [audioTags, legacyTags, paralinguisticTags, t]);
+
+  const activeSection =
+    tagSections.find((section) => section.kind === activeKind) ?? tagSections[0];
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /**
    * Has the CURRENT utterance been observed as `playing`? A poll tick that
@@ -491,6 +630,9 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     hapticLightPress();
     setPhase('synthesizing');
     setError(null);
+    // A new synthesis invalidates the previous engine-side display strings.
+    setSynthText(null);
+    setInputText(null);
     // A new utterance: the poll must not end it before it is seen playing.
     hasStartedRef.current = false;
     autoResumeAttemptedRef.current = false;
@@ -504,11 +646,24 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         model: capability?.[getProviderModelFieldKey(providerType, 'tts')],
         capability_json: capability,
         voice_config_file: capability?.voice_config_file,
+        // Demo switches: the engine vocalizes (or skips) nonverbal spans and
+        // caps how many cue/tone tags it renders per utterance.
+        vocalize_nonverbal: vocalizeNonverbal,
+        audio_tag_budget: cueBudget,
       });
       const audio = res.audio_base64 || res.audio || res.data;
       if (!audio) {
         throw new Error('No audio returned');
       }
+      // The EXACT provider-bound string + the input echo. Display only — the
+      // bracket text never leaves this panel (chat text stays asterisk-only).
+      setSynthText(typeof res.text === 'string' && res.text.trim() !== '' ? res.text : null);
+      setInputText(
+        typeof res.input_text === 'string' && res.input_text.trim() !== ''
+          ? res.input_text
+          : null,
+      );
+      setSentOpen(true);
       const result = resolveSynthesizedAudio(audio, audioMime(res.format));
       await playSynthesizedAudio(result.base64, result.mime);
 
@@ -519,7 +674,7 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
       setLastAudio(result);
       setLastSynthText(spoken);
       setLastSynthFingerprint(
-        synthesisFingerprint({ providerType, accountId, capability }),
+        synthesisFingerprint({ providerType, accountId, capability, vocalizeNonverbal, cueBudget }),
       );
       setPosition(0);
       setPhase('playing');
@@ -534,6 +689,8 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     accountId,
     capability,
     canSynthesize,
+    vocalizeNonverbal,
+    cueBudget,
     t,
   ]);
 
@@ -546,6 +703,8 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     providerType,
     accountId,
     capability,
+    vocalizeNonverbal,
+    cueBudget,
   });
 
   /**
@@ -700,10 +859,6 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     setText((prev) => (prev.trim() ? `${prev.trimEnd()} ${tag}` : tag));
   };
 
-  // Inline chip cap: everything past MAX_INLINE_TAGS moves behind the picker.
-  const inlineTags = paralinguisticTags.slice(0, MAX_INLINE_TAGS);
-  const hiddenTagCount = paralinguisticTags.length - inlineTags.length;
-
   return (
     <View style={styles.wrapper}>
       {/* ── Offline notice (non-blocking: the engine HTTP route may still answer) ── */}
@@ -721,43 +876,134 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         </>
       ) : null}
 
-      {/* ── Paralinguistic quick-insert chips (`tag-pill`) ── */}
-      {paralinguisticTags.length > 0 ? (
-        <View style={styles.tagRow} testID="tts-tag-chips">
-          {inlineTags.map((tag) => (
+      {/* ── Kinded quick-insert toolbar (`tag-pill`) ── */}
+      {tagSections.length > 0 && activeSection ? (
+        <>
+          <View style={styles.kindRow}>
+            {tagSections.length > 1 ? (
+              <View style={styles.segmented} testID="tts-tag-kind-switch">
+                {tagSections.map((section) => {
+                  const isActive = section.kind === activeSection.kind;
+                  return (
+                    <TouchableOpacity
+                      key={section.kind}
+                      testID={`tts-tag-kind:${section.kind}`}
+                      onPress={() => {
+                        hapticLightPress();
+                        setActiveKind(section.kind);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive }}
+                      accessibilityLabel={section.label}
+                      style={[styles.segment, isActive ? styles.segmentActive : null]}
+                    >
+                      <ThemedText
+                        size={10.5}
+                        weight="medium"
+                        style={isActive ? styles.segmentActiveText : styles.segmentText}
+                      >
+                        {`${section.label} · ${section.tags.length}`}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
             <TouchableOpacity
-              key={tag}
-              testID={paralinguisticTagTestId(tag)}
-              onPress={() => insertTag(tag)}
-              disabled={isBusy}
-              accessibilityRole="button"
-              accessibilityLabel={`Insert ${tag}`}
-              style={[styles.tagChip, isBusy ? styles.disabled : null]}
-            >
-              <ThemedText size={10.5} style={styles.tagChipText}>
-                {tag}
-              </ThemedText>
-            </TouchableOpacity>
-          ))}
-          {hiddenTagCount > 0 ? (
-            <TouchableOpacity
-              testID="tts-tag-more"
+              testID="tts-tag-search-all"
               onPress={() => {
                 if (isBusy) return;
                 hapticLightPress();
+                setPickerKind(null);
                 setTagPickerVisible(true);
               }}
               disabled={isBusy}
               accessibilityRole="button"
-              accessibilityLabel={t('tagMore', { count: hiddenTagCount })}
-              style={[styles.tagChip, styles.tagChipMore, isBusy ? styles.disabled : null]}
+              accessibilityLabel={t('tagSearchPlaceholderAll')}
+              style={[styles.searchAllButton, isBusy ? styles.disabled : null]}
             >
-              <ThemedText size={10.5} style={[styles.tagChipText, styles.tagChipMoreText]}>
-                {t('tagMore', { count: hiddenTagCount })}
+              <Icon name="magnify" size={13} color="#94A3B8" />
+              <ThemedText size={10.5} style={styles.tagChipMoreText}>
+                {t('tagSearchPlaceholderAll')}
               </ThemedText>
             </TouchableOpacity>
-          ) : null}
-        </View>
+          </View>
+
+          <View style={styles.tagRow} testID="tts-tag-chips">
+            {activeSection.tags.slice(0, MAX_INLINE_TAGS).map((tag) => (
+              <TouchableOpacity
+                key={tag}
+                testID={paralinguisticTagTestId(tag)}
+                onPress={() => insertTag(tag)}
+                disabled={isBusy}
+                accessibilityRole="button"
+                accessibilityLabel={`Insert ${tag}`}
+                style={[styles.tagChip, isBusy ? styles.disabled : null]}
+              >
+                <ThemedText size={10.5} style={styles.tagChipText}>
+                  {tag}
+                </ThemedText>
+              </TouchableOpacity>
+            ))}
+            {activeSection.tags.length > MAX_INLINE_TAGS ? (
+              <TouchableOpacity
+                testID="tts-tag-more"
+                onPress={() => {
+                  if (isBusy) return;
+                  hapticLightPress();
+                  setPickerKind(activeSection.kind);
+                  setTagPickerVisible(true);
+                }}
+                disabled={isBusy}
+                accessibilityRole="button"
+                accessibilityLabel={t('tagMore', {
+                  count: activeSection.tags.length - MAX_INLINE_TAGS,
+                })}
+                style={[styles.tagChip, styles.tagChipMore, isBusy ? styles.disabled : null]}
+              >
+                <ThemedText size={10.5} style={[styles.tagChipText, styles.tagChipMoreText]}>
+                  {t('tagMore', { count: activeSection.tags.length - MAX_INLINE_TAGS })}
+                </ThemedText>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* ── Preset sample scripts (tap to fill the input) ── */}
+          <View style={styles.presetRow} testID="tts-sample-scripts">
+            <ThemedText size={10.5} variant="muted" style={styles.presetLabel}>
+              {t('sampleScripts')}
+            </ThemedText>
+            {SAMPLE_SCRIPTS.map((script) => (
+              <TouchableOpacity
+                key={script.key}
+                testID={`tts-sample-script:${script.key}`}
+                onPress={() => {
+                  if (isBusy) return;
+                  hapticLightPress();
+                  setText(t(script.labelKey));
+                }}
+                disabled={isBusy}
+                accessibilityRole="button"
+                accessibilityLabel={t(script.labelKey)}
+                style={[styles.presetChip, isBusy ? styles.disabled : null]}
+              >
+                <ThemedText size={10} style={styles.presetChipText} numberOfLines={1}>
+                  {t(script.labelKey)}
+                </ThemedText>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      ) : audioTags ? (
+        // Tag-free model: no chips, no pickers, no tag-bearing presets.
+        <ThemedText
+          size={11.5}
+          variant="muted"
+          testID="tts-no-audio-tags"
+          accessibilityRole="text"
+        >
+          {t('audioTagsNoneHint')}
+        </ThemedText>
       ) : null}
 
       {/* ── Sample text input (`sh-textarea`) ── */}
@@ -772,6 +1018,115 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         editable={!isBusy}
         testID="tts-text-input"
       />
+
+      {/* ── "Sent to TTS": the EXACT string the engine handed the provider ── */}
+      {synthText || inputText ? (
+        <View style={styles.sentBlock} testID="tts-sent-to-tts">
+          <TouchableOpacity
+            testID="tts-sent-text-toggle"
+            onPress={() => {
+              hapticLightPress();
+              setSentOpen((open) => !open);
+            }}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: sentOpen }}
+            accessibilityLabel={t('sentToTts')}
+            style={styles.sentHeader}
+          >
+            <ThemedText size={11} weight="medium" variant="secondary">
+              {t('sentToTts')}
+            </ThemedText>
+            <View style={styles.sentBadge}>
+              <ThemedText size={9} style={styles.sentBadgeText}>
+                {t('sentToTtsProviderOutput')}
+              </ThemedText>
+            </View>
+            <Icon
+              name={sentOpen ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color="#94A3B8"
+            />
+          </TouchableOpacity>
+          {sentOpen && synthText ? (
+            <ThemedText size={10.5} style={styles.sentText} testID="tts-sent-text">
+              {synthText}
+            </ThemedText>
+          ) : null}
+          {sentOpen && inputText ? (
+            <ThemedText
+              size={10}
+              variant="muted"
+              style={styles.inputEcho}
+              testID="tts-input-echo"
+            >
+              {t('inputEcho', { text: inputText })}
+            </ThemedText>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* ── Demo switches: vocalize nonverbal + cue budget ── */}
+      {tagSections.length > 0 ? (
+        <>
+          <View style={styles.switchRow}>
+            <View style={styles.switchTextWrap}>
+              <ThemedText size={11.5} weight="medium">
+                {t('voiceActions')}
+              </ThemedText>
+              <ThemedText size={10.5} variant="muted">
+                {t('voiceActionsHint')}
+              </ThemedText>
+            </View>
+            <Switch
+              testID="tts-vocalize-nonverbal"
+              value={vocalizeNonverbal}
+              onValueChange={(value) => {
+                hapticLightPress();
+                setVocalizeNonverbal(value);
+              }}
+              disabled={isBusy}
+              accessibilityRole="switch"
+              accessibilityLabel={t('voiceActions')}
+              accessibilityState={{ checked: vocalizeNonverbal }}
+              trackColor={{ false: 'rgba(148,163,184,0.25)', true: 'rgba(217,70,239,0.55)' }}
+              thumbColor="#E9D5FF"
+            />
+          </View>
+          <View style={styles.budgetRow}>
+            <ThemedText size={11} variant="secondary" style={styles.budgetLabel}>
+              {t('cueBudgetDemo')}
+            </ThemedText>
+            <View style={styles.segmented}>
+              {CUE_BUDGET_OPTIONS.map((option) => {
+                const isActive = cueBudget === option;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    testID={`tts-cue-budget:${option}`}
+                    onPress={() => {
+                      hapticLightPress();
+                      setCueBudget(option);
+                    }}
+                    disabled={isBusy}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isActive }}
+                    accessibilityLabel={`${t('cueBudgetDemo')} ${option}`}
+                    style={[styles.segment, isActive ? styles.segmentActive : null]}
+                  >
+                    <ThemedText
+                      size={10.5}
+                      weight="medium"
+                      style={isActive ? styles.segmentActiveText : styles.segmentText}
+                    >
+                      {String(option)}
+                    </ThemedText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </>
+      ) : null}
 
       {/* ── Player row / synthesize button + format badge + download ── */}
       <View style={styles.footerRow}>
@@ -858,10 +1213,11 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         </ThemedText>
       )}
 
-      {/* ── Full paralinguistic-tag list (searchable) ── */}
+      {/* ── Full tag list (grouped by kind, searchable) ── */}
       <TtsTagPickerModal
         visible={tagPickerVisible}
-        tags={paralinguisticTags}
+        sections={tagSections}
+        kindFilter={pickerKind}
         onClose={() => setTagPickerVisible(false)}
         onPick={(tag) => {
           insertTag(tag);
@@ -898,6 +1254,115 @@ const styles = StyleSheet.create({
   },
   tagChipMoreText: {
     color: '#94A3B8',
+  },
+  kindRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  searchAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  segmented: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 7,
+    padding: 2,
+    gap: 2,
+    backgroundColor: '#070B14',
+  },
+  segment: {
+    borderRadius: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  segmentActive: {
+    backgroundColor: 'rgba(168, 85, 247, 0.28)',
+  },
+  segmentText: {
+    color: '#94A3B8',
+  },
+  segmentActiveText: {
+    color: '#E9D5FF',
+  },
+  presetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 5,
+  },
+  presetLabel: {
+    marginRight: 2,
+  },
+  presetChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    maxWidth: 150,
+  },
+  presetChipText: {
+    color: '#CBD5E1',
+  },
+  sentBlock: {
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    borderRadius: 9,
+    backgroundColor: '#070B14',
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    gap: 4,
+  },
+  sentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sentBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  sentBadgeText: {
+    color: '#38BDF8',
+  },
+  sentText: {
+    color: '#E9D5FF',
+    fontFamily: 'monospace',
+    lineHeight: 15,
+  },
+  inputEcho: {
+    fontFamily: 'monospace',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  switchTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  budgetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  budgetLabel: {
+    flex: 1,
   },
   input: {
     backgroundColor: '#070B14',

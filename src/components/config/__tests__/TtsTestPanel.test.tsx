@@ -166,6 +166,33 @@ import {
   deactivateKeepScreenOn,
 } from '../../../services/keepScreenOn';
 import { makeWavFixture } from '../../../utils/__tests__/audioFixtures';
+import type { AudioTagCapabilities } from '../../../constants/modelCapabilities';
+
+/**
+ * Kinded capability fixture: cues 3 (open), tones 10 (open → 8 inline + more),
+ * breaks 1 (open). Mirrors the engine's wire shape (bracket-free words).
+ */
+const KINDED_TAGS: AudioTagCapabilities = {
+  syntax: '[{}]',
+  cues: { mode: 'open', vocabulary: ['sighs', 'laughs', 'clears throat'] },
+  tones: {
+    mode: 'open',
+    vocabulary: [
+      'excited',
+      'sad',
+      'short pause',
+      'long pause',
+      'whispers',
+      'shouts',
+      'tired',
+      'angry',
+      'calm',
+      'warm',
+    ],
+  },
+  breaks: { mode: 'open', vocabulary: ['short pause'] },
+};
+
 
 const mockPlayBase64Audio = (AudioPlayer as any).playBase64Audio as jest.Mock;
 const mockStop = (AudioPlayer as any).stop as jest.Mock;
@@ -300,6 +327,9 @@ describe('TtsTestPanel — stateless direct synthesis (Phase 3-5)', () => {
       model: 'soulvoice-x',
       capability_json: capability,
       voice_config_file: 'narrator.voice.json',
+      // The demo switches always travel with the request (engine defaults).
+      vocalize_nonverbal: false,
+      audio_tag_budget: 3,
     });
     expect(mockPlayBase64Audio).toHaveBeenCalledWith('QUJDRA==', 'audio/wav');
     // Duration comes up-front from the static parser, not the first poll.
@@ -989,7 +1019,7 @@ describe('TtsTestPanel — actual audio format (bytes win over the declared labe
 });
 
 describe('TtsTestPanel — paralinguistic quick-insert chips', () => {
-  it('appends a chip tag to the sample text', async () => {
+  it('appends a chip tag in ASTERISK form to the sample text', async () => {
     const tags = ['[laughter]', '[sigh]', '[clears throat]'];
     const utils = await render(
       <TtsTestPanel providerType="soulvoice" paralinguisticTags={tags} />,
@@ -997,51 +1027,67 @@ describe('TtsTestPanel — paralinguistic quick-insert chips', () => {
     await flush();
 
     expect(utils.getByTestId('tts-tag-chips')).toBeTruthy();
+    // Stable testIDs are unchanged by the bracket → asterisk form switch.
     expect(utils.getByTestId(paralinguisticTagTestId('[clears throat]'))).toBeTruthy();
 
     await fireEvent.press(utils.getByTestId(paralinguisticTagTestId('[laughter]')));
-    expect(utils.getByTestId('tts-text-input').props.value).toBe('sampleText [laughter]');
+    expect(utils.getByTestId('tts-text-input').props.value).toBe('sampleText *laughter*');
 
     await fireEvent.press(utils.getByTestId(paralinguisticTagTestId('[sigh]')));
     expect(utils.getByTestId('tts-text-input').props.value).toBe(
-      'sampleText [laughter] [sigh]',
+      'sampleText *laughter* *sigh*',
     );
+    // Bracket-free invariant: the text field never receives `[tag]` syntax.
+    expect(utils.getByTestId('tts-text-input').props.value).not.toMatch(/\[/);
+  });
+
+  it('renders a flat "All tags" section for an old engine, no kind switch', async () => {
+    const utils = await render(
+      <TtsTestPanel providerType="soulvoice" legacyTags={['[tag1]']} />,
+    );
+    await flush();
+
+    expect(utils.getByTestId('tts-tag-chips')).toBeTruthy();
+    expect(utils.queryByTestId('tts-tag-kind-switch')).toBeNull();
+    expect(utils.getByTestId(paralinguisticTagTestId('[tag1]'))).toBeTruthy();
   });
 
   it('renders no chips when the model declares none', async () => {
     const utils = await render(<TtsTestPanel providerType="soulvoice" />);
     await flush();
     expect(utils.queryByTestId('tts-tag-chips')).toBeNull();
+    // No kinded capabilities were passed → nothing to report either.
+    expect(utils.queryByTestId('tts-no-audio-tags')).toBeNull();
   });
 
-  it('caps the inline chips at 20 and folds the rest into the more-chip', async () => {
+  it('caps the inline chips at 8 per kind and folds the rest into the more-chip', async () => {
     const tags = Array.from({ length: 25 }, (_, i) => `[tag-${i + 1}]`);
     const utils = await render(
       <TtsTestPanel providerType="soulvoice" paralinguisticTags={tags} />,
     );
     await flush();
 
-    const rendered = tags.filter((tag) =>
-      utils.queryByTestId(paralinguisticTagTestId(tag)) !== null,
+    const rendered = tags.filter(
+      (tag) => utils.queryByTestId(paralinguisticTagTestId(tag)) !== null,
     );
-    expect(rendered).toHaveLength(20);
+    expect(rendered).toHaveLength(8);
     expect(utils.getByTestId('tts-tag-more')).toBeTruthy();
-    expect(utils.getByText('tagMore:5')).toBeTruthy();
+    expect(utils.getByText('tagMore:17')).toBeTruthy();
   });
 
   it('does not render a more-chip when the vocabulary fits inline', async () => {
-    const tags = Array.from({ length: 20 }, (_, i) => `[tag-${i + 1}]`);
+    const tags = Array.from({ length: 8 }, (_, i) => `[tag-${i + 1}]`);
     const utils = await render(
       <TtsTestPanel providerType="soulvoice" paralinguisticTags={tags} />,
     );
     await flush();
 
     expect(utils.queryByTestId('tts-tag-more')).toBeNull();
-    expect(utils.queryByTestId(paralinguisticTagTestId('[tag-20]'))).toBeTruthy();
+    expect(utils.queryByTestId(paralinguisticTagTestId('[tag-8]'))).toBeTruthy();
   });
 
   it('inserts a tag picked from the full-list modal', async () => {
-    // > 20 tags → the picker is the only way to reach the tail. FlatList renders
+    // > 8 tags → the picker is the only way to reach the tail. FlatList renders
     // only its first window here, so pick a tag sorted into that window.
     const tags = Array.from({ length: 25 }, (_, i) => `[tag${i + 1}]`);
     const utils = await render(
@@ -1055,6 +1101,235 @@ describe('TtsTestPanel — paralinguistic quick-insert chips', () => {
     await fireEvent.press(utils.getByTestId('tts-tag-row:tag1'));
     await flush();
 
-    expect(utils.getByTestId('tts-text-input').props.value).toBe('sampleText [tag1]');
+    expect(utils.getByTestId('tts-text-input').props.value).toBe('sampleText *tag1*');
+  });
+});
+
+describe('TtsTestPanel — kinded tag pickers (Phase 3)', () => {
+  it('switches between kind sections and shows only that kind’s chips', async () => {
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    // Cues is the default section (AUDIO_TAG_KINDS order).
+    expect(utils.getByTestId('tts-tag-kind-switch')).toBeTruthy();
+    expect(utils.getByTestId(paralinguisticTagTestId('*sighs*'))).toBeTruthy();
+    expect(utils.queryByTestId(paralinguisticTagTestId('*excited*'))).toBeNull();
+
+    await fireEvent.press(utils.getByTestId('tts-tag-kind:tones'));
+    expect(utils.getByTestId(paralinguisticTagTestId('*excited*'))).toBeTruthy();
+    expect(utils.queryByTestId(paralinguisticTagTestId('*sighs*'))).toBeNull();
+
+    await fireEvent.press(utils.getByTestId('tts-tag-kind:breaks'));
+    expect(utils.getByTestId(paralinguisticTagTestId('*short pause*'))).toBeTruthy();
+  });
+
+  it('inserts the ASTERISK form (never a bracketed tag) from a kind chip', async () => {
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId(paralinguisticTagTestId('*clears throat*')));
+    const value = utils.getByTestId('tts-text-input').props.value;
+    expect(value).toBe('sampleText *clears throat*');
+    expect(value).not.toMatch(/\[/);
+  });
+
+  it('opens the grouped picker for one kind from the more-chip', async () => {
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    // Tones has 10 words → 8 inline + a more-chip (2 hidden).
+    await fireEvent.press(utils.getByTestId('tts-tag-kind:tones'));
+    expect(utils.getByText('tagMore:2')).toBeTruthy();
+
+    await fireEvent.press(utils.getByTestId('tts-tag-more'));
+    await flush();
+
+    // Kind-filtered: only the tones header/section exists.
+    expect(utils.getByTestId('tts-tag-section-tones')).toBeTruthy();
+    expect(utils.queryByTestId('tts-tag-section-cues')).toBeNull();
+    expect(utils.queryByTestId('tts-tag-section-breaks')).toBeNull();
+  });
+
+  it('opens every grouped section from "Search all"', async () => {
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-tag-search-all'));
+    await flush();
+
+    expect(utils.getByTestId('tts-tag-section-cues')).toBeTruthy();
+    expect(utils.getByTestId('tts-tag-section-tones')).toBeTruthy();
+    expect(utils.getByTestId('tts-tag-section-breaks')).toBeTruthy();
+  });
+
+  it('fills the input from a preset sample script (bracket-free)', async () => {
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-sample-script:sampleScriptCue'));
+    expect(utils.getByTestId('tts-text-input').props.value).toBe('sampleScriptCue');
+    expect(utils.getByTestId('tts-text-input').props.value).not.toMatch(/\[/);
+  });
+
+  it('shows the none-state for a tag-free model: no chips, pickers or presets', async () => {
+    const utils = await render(
+      <TtsTestPanel
+        providerType="elevenlabs"
+        audioTags={{
+          cues: { mode: 'none', vocabulary: [] },
+          tones: { mode: 'none', vocabulary: [] },
+          breaks: { mode: 'none', vocabulary: [] },
+        }}
+      />,
+    );
+    await flush();
+
+    expect(utils.getByTestId('tts-no-audio-tags')).toBeTruthy();
+    expect(utils.getByText('audioTagsNoneHint')).toBeTruthy();
+    expect(utils.queryByTestId('tts-tag-chips')).toBeNull();
+    expect(utils.queryByTestId('tts-tag-kind-switch')).toBeNull();
+    expect(utils.queryByTestId('tts-sample-scripts')).toBeNull();
+    expect(utils.queryByTestId('tts-vocalize-nonverbal')).toBeNull();
+  });
+});
+
+describe('TtsTestPanel — "Sent to TTS" + engine demo switches', () => {
+  it('shows the engine-rendered provider string labelled as provider output', async () => {
+    mockTestTtsSpeech.mockResolvedValue({
+      status: 'ok',
+      audio_base64: 'QUJDRA==',
+      format: 'wav',
+      text: '[sighs] Hello [short pause] there',
+      input_text: '*sighs* Hello *short pause* there',
+    });
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    // Nothing to show before a sample exists.
+    expect(utils.queryByTestId('tts-sent-to-tts')).toBeNull();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(utils.getByTestId('tts-sent-to-tts')).toBeTruthy();
+    expect(utils.getByTestId('tts-sent-text').props.children).toBe(
+      '[sighs] Hello [short pause] there',
+    );
+    // Clearly labelled as the provider-bound output…
+    expect(utils.getByTestId('tts-sent-to-tts')).toBeTruthy();
+    expect(utils.getByText('sentToTts')).toBeTruthy();
+    expect(utils.getByText('sentToTtsProviderOutput')).toBeTruthy();
+    // …with a muted input echo (display only).
+    expect(utils.getByTestId('tts-input-echo')).toBeTruthy();
+    // The user's own text stays bracket-free.
+    expect(utils.getByTestId('tts-text-input').props.value).not.toMatch(/\[/);
+  });
+
+  it('posts vocalize_nonverbal + audio_tag_budget with their defaults', async () => {
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
+    expect(mockTestTtsSpeech.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ vocalize_nonverbal: false, audio_tag_budget: 3 }),
+    );
+  });
+
+  it('re-synthesizes when a demo switch changes (fingerprint invalidation)', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
+    // End the sample so the big button returns.
+    await tickWithState('playing');
+    await tickWithState('ended');
+
+    await fireEvent(utils.getByTestId('tts-vocalize-nonverbal'), 'valueChange', true);
+    await fireEvent.press(utils.getByTestId('tts-cue-budget:5'));
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(2);
+    expect(mockTestTtsSpeech.mock.calls[1][0]).toEqual(
+      expect.objectContaining({ vocalize_nonverbal: true, audio_tag_budget: 5 }),
+    );
+  });
+
+  it('replays instantly while both demo switches are unchanged', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    await tickWithState('playing');
+    await tickWithState('ended');
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    // Same text + same settings → the kept sample is reused.
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the previous provider string when a new synthesis starts', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    mockTestTtsSpeech.mockResolvedValueOnce({
+      status: 'ok',
+      audio_base64: 'QUJDRA==',
+      format: 'wav',
+      text: '[sighs] Hello',
+      input_text: '*sighs* Hello',
+    });
+    const utils = await render(
+      <TtsTestPanel providerType="elevenlabs" audioTags={KINDED_TAGS} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    expect(utils.getByTestId('tts-sent-text')).toBeTruthy();
+    await tickWithState('playing');
+    await tickWithState('ended');
+
+    // The next response carries no provider strings (an older engine): the
+    // previous run's string must NOT survive the new synthesis.
+    mockTestTtsSpeech.mockResolvedValueOnce({
+      status: 'ok',
+      audio_base64: 'QUJDRA==',
+      format: 'wav',
+    });
+    await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Edited text');
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(2);
+    expect(utils.queryByTestId('tts-sent-to-tts')).toBeNull();
   });
 });

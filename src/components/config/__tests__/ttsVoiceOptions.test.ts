@@ -20,9 +20,43 @@
  */
 
 import {
+  normalizeTtsAccentOptions,
   normalizeTtsLanguageOptions,
   normalizeTtsVoiceOptions,
 } from '../ProviderSlotSection';
+
+describe('normalizeTtsAccentOptions', () => {
+  it('passes the engine-seeded display words through as id + name', () => {
+    expect(
+      normalizeTtsAccentOptions(['British accent', 'American accent', 'pirate voice']),
+    ).toEqual([
+      { id: 'British accent', name: 'British accent' },
+      { id: 'American accent', name: 'American accent' },
+      { id: 'pirate voice', name: 'pirate voice' },
+    ]);
+  });
+
+  it('unwraps a bracketed/asterisked wire value — the picker never shows brackets', () => {
+    expect(normalizeTtsAccentOptions(['[British accent]', '*Irish accent*'])).toEqual([
+      { id: 'British accent', name: 'British accent' },
+      { id: 'Irish accent', name: 'Irish accent' },
+    ]);
+  });
+
+  it('drops blanks, non-strings and duplicates', () => {
+    expect(
+      normalizeTtsAccentOptions(['British accent', '  ', 42, null, 'British accent', '[]']),
+    ).toEqual([{ id: 'British accent', name: 'British accent' }]);
+  });
+
+  it('returns [] for an absent/undeclared list (the caller shows no row)', () => {
+    expect(normalizeTtsAccentOptions(undefined)).toEqual([]);
+    expect(normalizeTtsAccentOptions(null)).toEqual([]);
+    expect(normalizeTtsAccentOptions([])).toEqual([]);
+    expect(normalizeTtsAccentOptions('British accent')).toEqual([]);
+    expect(normalizeTtsAccentOptions({ accents: ['British accent'] })).toEqual([]);
+  });
+});
 
 describe('normalizeTtsLanguageOptions', () => {
   it('passes plain language-name strings through (soulvoice live shape)', () => {

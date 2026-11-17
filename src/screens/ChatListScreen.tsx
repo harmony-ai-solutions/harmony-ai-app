@@ -58,6 +58,7 @@ import { openCharacterChat } from '../services/CharacterChatService';
 import { getLockedEntityIds } from '../services/variant/entityAccess';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
+import { getShowEmotionState, setShowEmotionState } from '../utils/chatDisplayPrefs';
 import { copyAppDiagnosticsWithToast } from '../services/diagnostics/appDiagnostics';
 import {
   getChatConversationSettingsBatch,
@@ -411,6 +412,9 @@ export const ChatListScreen: React.FC = () => {
     unreadCount: 0,
     replyMode: 'realistic',
   });
+  // tts-voice-ux Phase 5: per-conversation "Show emotional state" parity toggle
+  // (app-local AsyncStorage pref, keyed by participantKey — no engine change).
+  const [menuEmotionStateVisible, setMenuEmotionStateVisible] = useState(false);
   // Guards the async reply-mode load in handleLongPress: only apply the result
   // if the SAME conversation is still the one whose menu is open.
   const menuItemKeyRef = useRef<string | null>(null);
@@ -1082,6 +1086,13 @@ export const ChatListScreen: React.FC = () => {
       replyMode: 'realistic',
     });
     setMenuItem(item);
+    // tts-voice-ux Phase 5: optimistic default, then the persisted app-local pref.
+    setMenuEmotionStateVisible(false);
+    getShowEmotionState(item.participantKey).then(visible => {
+      if (menuItemKeyRef.current === item.participantKey) {
+        setMenuEmotionStateVisible(visible);
+      }
+    });
     // 4-4 (A6): read the SYNCED reply pacing from the settings column. The
     // legacy AsyncStorage migration happens inside getReplyMode.
     getReplyMode(item.participantKey).then(mode => {
@@ -1160,6 +1171,17 @@ export const ChatListScreen: React.FC = () => {
       log.error('Failed to set reply mode:', error);
     }
   }, [menuItem, menuSettings.replyMode, showToast, t]);
+
+  // tts-voice-ux Phase 5 — "Show emotional state" parity toggle. App-local
+  // AsyncStorage preference keyed by participantKey; the chat header reads the
+  // same key on focus, so the chip flips without an engine round-trip.
+  const handleToggleEmotionState = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    const next = !menuEmotionStateVisible;
+    setMenuEmotionStateVisible(next);
+    await setShowEmotionState(item.participantKey, next);
+  }, [menuItem, menuEmotionStateVisible]);
 
   const handleToggleRead = useCallback(async () => {
     const item = menuItem;
@@ -1485,6 +1507,8 @@ export const ChatListScreen: React.FC = () => {
         onToggleRead={handleToggleRead}
         onToggleDisable={handleToggleDisable}
         onToggleReplyMode={handleToggleReplyMode}
+        emotionStateVisible={menuEmotionStateVisible}
+        onToggleEmotionState={handleToggleEmotionState}
         onDelete={handleDelete}
       />
     </ThemedView>

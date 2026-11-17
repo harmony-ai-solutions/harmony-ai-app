@@ -8,6 +8,9 @@
  *   - Mute / Unmute      — suppress incoming-message alerts for this chat
 *  - Open chat bubble   — launch the floating bubble for this AI
  *  - Reply pacing       — toggle instant ↔ realistic replies for this chat (A6)
+ *  - Emotional state    — parity toggle for the in-chat "Show emotional state"
+ *                         display preference (tts-voice-ux Phase 5); rendered
+ *                         only when the parent passes the toggle handler
  *  - Mark as read / Unread — reset / bump the unread state
  *   - Disable / Enable   — stop the AI from sending AND receiving messages
  *   - Delete             — delete the conversation (messages + interaction)
@@ -60,6 +63,13 @@ interface ChatConversationMenuModalProps {
   onToggleRead: () => void;
   onToggleDisable: () => void;
   onToggleReplyMode: () => void;
+  /**
+   * Optional parity toggle for the in-chat "Show emotional state" preference.
+   * Rendered only when the handler is supplied (the chat list owns the
+   * per-conversation participantKey, so it decides whether to wire this).
+   */
+  emotionStateVisible?: boolean;
+  onToggleEmotionState?: () => void;
   onDelete: () => void;
 }
 
@@ -83,6 +93,8 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
   onToggleRead,
   onToggleDisable,
   onToggleReplyMode,
+  emotionStateVisible = false,
+  onToggleEmotionState,
   onDelete,
 }) => {
   const { theme } = useAppTheme();
@@ -136,6 +148,21 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
       color: accent,
       onPress: onToggleReplyMode,
     },
+    // Emotional-state display preference (tts-voice-ux Phase 5 parity). Only
+    // offered when the parent wires the handler — the chat list owns the
+    // per-conversation participantKey the preference is keyed by.
+    ...(onToggleEmotionState
+      ? [
+          {
+            icon: 'heart-pulse',
+            label: emotionStateVisible
+              ? t('menuHideEmotionState')
+              : t('menuShowEmotionState'),
+            color: accent,
+            onPress: onToggleEmotionState,
+          } as MenuAction,
+        ]
+      : []),
     {
       icon: settings.unreadCount > 0 ? 'check-all' : 'email-outline',
       // Unread → "Mark as read"; already read → "Mark as unread".

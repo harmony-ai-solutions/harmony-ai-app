@@ -42,6 +42,8 @@ import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityC
 import {
   catalogModelsForModule,
   findModel,
+  getAudioTagCapabilities,
+  getLegacyTagList,
   getSpeechOptions,
 } from '../../constants/modelCapabilities';
 import type { FieldDefinition } from '../../constants/providerFieldSchemas';
@@ -771,7 +773,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     return value == null ? '' : String(value);
   };
 
-  // ── Selected TTS model (for test-panel paralinguistic tags) ──
+  // ── Selected TTS model (for the test panel's tag vocabulary) ──
   const ttsSlot = slots.provider;
   const selectedTtsModel = useMemo(() => {
     if (moduleType !== 'tts' || !ttsSlot?.providerType) return null;
@@ -779,6 +781,33 @@ export const ModuleConfigEditScreen: React.FC = () => {
     const entries = catalogModelsForModule(catalog[ttsSlot.providerType], 'tts');
     return findModel(entries, ttsSlot.capability?.[key]) ?? null;
   }, [moduleType, ttsSlot, catalog]);
+
+  /**
+   * The test studio's kinded tag capabilities, resolved from the TIER-2 catalog
+   * by (provider type, model id) — live descriptors carry only the legacy flat
+   * `paralinguistic_tags`. The flat list stays as the old-engine fallback.
+   *
+   * Plain derivations (not `useMemo`): they are small normalized lookups and
+   * the component already returns early for a missing theme, so a hook here
+   * would only add a conditional-hook ordering hazard.
+   */
+  const ttsModelId = ttsSlot?.providerType
+    ? ttsSlot.capability?.[getProviderModelFieldKey(ttsSlot.providerType, 'tts')]
+    : undefined;
+  const ttsAudioTags =
+    moduleType === 'tts' && ttsSlot?.providerType
+      ? getAudioTagCapabilities(catalog, ttsSlot.providerType, ttsModelId)
+      : undefined;
+  const ttsLegacyTags = (() => {
+    if (moduleType !== 'tts') return [];
+    const fromCatalog = getLegacyTagList(selectedTtsModel);
+    if (fromCatalog.length > 0) return fromCatalog;
+    const declared = getSpeechOptions(selectedTtsModel)?.paralinguistic_tags;
+    return Array.isArray(declared)
+      ? declared.filter((tag): tag is string => typeof tag === 'string' && tag.trim() !== '')
+      : [];
+  })();
+
 
   // ── Loading state ──
   if (loading) {
@@ -1323,7 +1352,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
                   providerType={slots.provider?.providerType}
                   accountId={slots.provider?.accountId}
                   capability={slots.provider?.capability}
-                  paralinguisticTags={getSpeechOptions(selectedTtsModel)?.paralinguistic_tags}
+                  audioTags={ttsAudioTags}
+                  legacyTags={ttsLegacyTags}
                 />
               </View>
             </ThemedCard>

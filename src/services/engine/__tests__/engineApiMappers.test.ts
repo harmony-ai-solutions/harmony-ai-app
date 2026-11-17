@@ -7,6 +7,7 @@ import {
   mapCharacterProfile,
   mapConversationMessage,
   mapEmojiAction,
+  mapEmotionDerived,
   mapEmotionState,
   mapEntityConfig,
   mapInteraction,
@@ -14,6 +15,7 @@ import {
 } from '../engineApiMappers';
 import type {
   ConversationMessageDto,
+  EmotionDerivedDto,
   EmotionStateDto,
   EntityConfigDto,
   InteractionDto,
@@ -135,6 +137,62 @@ describe('engineApiMappers', () => {
     expect(e.deleted_at).toBeNull();
   });
 
+  it('maps the engine-derived view to camelCase (labels, dyads, top emotions)', () => {
+    const dto: EmotionDerivedDto = {
+      dominant_emotion: 'joy',
+      dominant_intensity: 9.4,
+      intensity_label: 'overwhelming',
+      intensity_labels: { joy: 'overwhelming', sadness: 'neutral' },
+      active_dyads: [
+        {
+          keyword: 'affection',
+          type: 'primary',
+          source_emotions: ['joy', 'trust'],
+          source_intensities: [9.4, 6.2],
+          combined_intensity: 15.6,
+          description: 'a warm sense of affection blooms in your heart',
+        },
+      ],
+      top_emotions: [
+        { emotion: 'joy', intensity: 9.4, label: 'overwhelming' },
+        { emotion: 'trust', intensity: 6.2, label: 'strong' },
+        { emotion: 'anticipation', intensity: 4.8, label: 'moderate' },
+      ],
+    };
+    const d = mapEmotionDerived(dto)!;
+    expect(d.dominantEmotion).toBe('joy');
+    expect(d.dominantIntensity).toBe(9.4);
+    expect(d.intensityLabel).toBe('overwhelming');
+    expect(d.intensityLabels).toEqual({ joy: 'overwhelming', sadness: 'neutral' });
+    expect(d.activeDyads).toHaveLength(1);
+    expect(d.activeDyads[0]).toEqual({
+      keyword: 'affection',
+      type: 'primary',
+      sourceEmotions: ['joy', 'trust'],
+      sourceIntensities: [9.4, 6.2],
+      combinedIntensity: 15.6,
+      description: 'a warm sense of affection blooms in your heart',
+    });
+    expect(d.topEmotions.map(t => t.emotion)).toEqual(['joy', 'trust', 'anticipation']);
+  });
+
+  it('returns null when the engine omits emotion_derived (older engine)', () => {
+    expect(mapEmotionDerived(undefined)).toBeNull();
+    expect(mapEmotionDerived(null)).toBeNull();
+  });
+
+  it('degrades gracefully on a partial derived payload', () => {
+    const d = mapEmotionDerived({} as EmotionDerivedDto)!;
+    expect(d).toEqual({
+      dominantEmotion: '',
+      dominantIntensity: 0,
+      intensityLabel: '',
+      intensityLabels: {},
+      activeDyads: [],
+      topEmotions: [],
+    });
+  });
+
   it('maps memory dates', () => {
     const dto: MemoryDto = {
       id: 'mem1',
@@ -177,6 +235,39 @@ describe('engineApiMappers', () => {
     expect(p.tags).toBe('[]');
     expect(p.is_favorite).toBe(0); // payload omits is_favorite
     expect(p.created_at).toBeInstanceOf(Date);
+  });
+
+  it('propagates the engine-derived vocal expressiveness (fail-safe natural)', () => {
+    const expressive = mapCharacterProfile({
+      id: 'p1',
+      name: 'Aria',
+      description: 'd',
+      personality: 'p',
+      vocal_expressiveness: 'expressive',
+    });
+    expect(expressive.vocal_expressiveness).toBe('expressive');
+
+    // Blank/absent ⇒ `natural` (the engine's own blank→natural rule).
+    expect(
+      mapCharacterProfile({
+        id: 'p1',
+        name: 'Aria',
+        description: 'd',
+        personality: 'p',
+        vocal_expressiveness: '',
+      }).vocal_expressiveness,
+    ).toBe('natural');
+
+    // An unknown newer level is passed through verbatim, never rewritten.
+    expect(
+      mapCharacterProfile({
+        id: 'p1',
+        name: 'Aria',
+        description: 'd',
+        personality: 'p',
+        vocal_expressiveness: 'theatrical',
+      }).vocal_expressiveness,
+    ).toBe('theatrical');
   });
 
   it('maps character image info with optional bytes', () => {

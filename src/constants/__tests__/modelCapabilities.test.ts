@@ -6,6 +6,9 @@
 import {
   MODULE_CAPABILITY_TAGS,
   catalogModelsForModule,
+  getAudioTagCapabilities,
+  getAudioTagCapabilitiesForModel,
+  getLegacyTagList,
   getSpeechOptions,
   isSamplingParamKey,
   isParamSupported,
@@ -15,6 +18,10 @@ import {
   findModel,
 } from '../modelCapabilities';
 import type { ModelInfoDto } from '../../services/engine/EngineApiClient';
+import {
+  audioTagCapabilitiesChatterboxTurboFixture,
+  audioTagCapabilitiesElevenV3Fixture,
+} from '../../services/engine/__fixtures__/managementContract.fixtures';
 
 const chat: ModelInfoDto = { id: 'chat-1', capabilities: ['chat'] };
 const embed: ModelInfoDto = { id: 'embed-1', capabilities: ['embedding'] };
@@ -224,5 +231,129 @@ describe('findModel', () => {
     expect(findModel([chat, embed], 'embed-1')?.id).toBe('embed-1');
     expect(findModel([chat], null)).toBeUndefined();
     expect(findModel(null, 'chat-1')).toBeUndefined();
+  });
+});
+
+describe('kinded audio-tag capabilities (tts-voice-ux Phase 1)', () => {
+  // Fixture-driven catalog: the engine's seeded Eleven v3 row (open 12/48/3),
+  // the tag-free v2 row, and Chatterbox Turbo (closed 9/10, no breaks).
+  const catalog: Record<string, ModelInfoDto[]> = {
+    elevenlabs: [
+      { id: 'eleven_v3', meta: { audio_tags: audioTagCapabilitiesElevenV3Fixture } },
+      { id: 'eleven_multilingual_v2', meta: { speech_options: { paralinguistic_tags: [] } } },
+    ],
+    soulbitscloud: [
+      { id: 'chatterbox_turbo', meta: { audio_tags: audioTagCapabilitiesChatterboxTurboFixture } },
+    ],
+  };
+
+  it('resolves kinds by (provider, modelId) with the engine seed counts', () => {
+    const el = getAudioTagCapabilities(catalog, 'elevenlabs', 'eleven_v3');
+    expect(el.syntax).toBe('[{}]');
+    expect(el.cues.mode).toBe('open');
+    expect(el.tones.mode).toBe('open');
+    expect(el.breaks.mode).toBe('open');
+    expect(el.cues.vocabulary).toHaveLength(12);
+    expect(el.tones.vocabulary).toHaveLength(48);
+    expect(el.breaks.vocabulary).toHaveLength(3);
+
+    const turbo = getAudioTagCapabilities(catalog, 'soulbitscloud', 'chatterbox_turbo');
+    expect(turbo.cues.mode).toBe('closed');
+    expect(turbo.tones.mode).toBe('closed');
+    expect(turbo.cues.vocabulary).toHaveLength(9);
+    expect(turbo.tones.vocabulary).toHaveLength(10);
+  });
+
+  it('folds a MISSING kind to none with an empty vocabulary (turbo has no breaks)', () => {
+    const turbo = getAudioTagCapabilities(catalog, 'soulbitscloud', 'chatterbox_turbo');
+    expect(turbo.breaks).toEqual({ mode: 'none', vocabulary: [] });
+  });
+
+  it('folds an unknown mode to none and drops malformed vocabulary entries', () => {
+    const model: ModelInfoDto = {
+      id: 'weird',
+      meta: {
+        audio_tags: {
+          cues: { mode: 'ARCHIVED', vocabulary: ['laughs', '', 3, '  sighs  ', null] },
+          tones: { mode: ' Open ', vocabulary: ['whispers'] },
+        },
+      },
+    };
+    const caps = getAudioTagCapabilitiesForModel(model);
+    expect(caps.cues.mode).toBe('none');
+    expect(caps.cues.vocabulary).toEqual(['laughs', 'sighs']);
+    // A known mode is case/space tolerant.
+    expect(caps.tones).toEqual({ mode: 'open', vocabulary: ['whispers'] });
+    // No `syntax` on the wire ⇒ none is invented.
+    expect(caps.syntax).toBeUndefined();
+  });
+
+  it('never fabricates: absent block / unknown model / unknown provider ⇒ all none', () => {
+    const none = {
+      cues: { mode: 'none', vocabulary: [] },
+      tones: { mode: 'none', vocabulary: [] },
+      breaks: { mode: 'none', vocabulary: [] },
+    };
+    expect(getAudioTagCapabilities(catalog, 'elevenlabs', 'eleven_multilingual_v2')).toEqual(none);
+    expect(getAudioTagCapabilities(catalog, 'elevenlabs', 'ghost')).toEqual(none);
+    expect(getAudioTagCapabilities(catalog, 'ghost', 'eleven_v3')).toEqual(none);
+    expect(getAudioTagCapabilities({}, 'elevenlabs', 'eleven_v3')).toEqual(none);
+    expect(getAudioTagCapabilities(null, 'elevenlabs', 'eleven_v3')).toEqual(none);
+    expect(getAudioTagCapabilities(catalog, null, 'eleven_v3')).toEqual(none);
+    expect(getAudioTagCapabilities(catalog, 'elevenlabs', null)).toEqual(none);
+    expect(getAudioTagCapabilitiesForModel(undefined)).toEqual(none);
+    expect(getAudioTagCapabilitiesForModel({ id: 'x', meta: { audio_tags: 'nope' } })).toEqual(none);
+  });
+
+  it('returns a fresh object per call (no shared mutable state)', () => {
+    const first = getAudioTagCapabilities(catalog, 'elevenlabs', 'ghost');
+    first.cues.vocabulary.push('injected');
+    expect(getAudioTagCapabilities(catalog, 'elevenlabs', 'ghost').cues.vocabulary).toEqual([]);
+  });
+
+  it('getLegacyTagList is the declared flat list only (never fabricated)', () => {
+    const withLegacy: ModelInfoDto = {
+      id: 'old-engine-tts',
+      meta: { speech_options: { paralinguistic_tags: ['[laugh]', ' ', '[sigh]'] } },
+    };
+    expect(getLegacyTagList(withLegacy)).toEqual(['[laugh]', '[sigh]']);
+    expect(getLegacyTagList({ id: 'untagged', meta: {} })).toEqual([]);
+    expect(getLegacyTagList(unknown)).toEqual([]);
+    expect(getLegacyTagList(undefined)).toEqual([]);
+    expect(
+      getLegacyTagList({ id: 'bad', meta: { speech_options: { paralinguistic_tags: 'nope' } } }),
+    ).toEqual([]);
+  });
+
+  it('resolveEffectiveSpeechOptions no longer injects the stale 5-tag Chatterbox list', () => {
+    for (const id of ['chatterbox', 'chatterbox_turbo', 'chatterbox-multilingual']) {
+      const options = resolveEffectiveSpeechOptions(undefined, id, 'soulbitscloud');
+      expect(options?.paralinguistic_tags).toBeUndefined();
+      // The family generation-param fallbacks are still correct.
+      expect(Array.isArray(options?.supported_generation_params)).toBe(true);
+    }
+    const turbo = resolveEffectiveSpeechOptions(undefined, 'chatterbox_turbo', 'soulbitscloud');
+    expect(turbo?.supported_generation_params).toEqual([
+      'temperature',
+      'repetition_penalty',
+      'top_p',
+      'norm_loudness',
+    ]);
+    const plain = resolveEffectiveSpeechOptions(undefined, 'chatterbox', 'soulbitscloud');
+    expect(plain?.supported_generation_params).toContain('exaggeration');
+  });
+
+  it('keeps a DECLARED flat tag list untouched for an untagged model', () => {
+    const model: ModelInfoDto = {
+      id: 'chatterbox',
+      meta: {
+        speech_options: {
+          paralinguistic_tags: ['[laugh]', '[sigh]'],
+          supported_generation_params: ['temperature'],
+        },
+      },
+    };
+    const options = resolveEffectiveSpeechOptions(model, 'chatterbox', 'soulbitscloud');
+    expect(options?.paralinguistic_tags).toEqual(['[laugh]', '[sigh]']);
   });
 });

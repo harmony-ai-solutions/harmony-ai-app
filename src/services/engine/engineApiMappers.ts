@@ -25,15 +25,18 @@ import type {
 } from '../../database/models';
 import type { EmotionEffect, MetabolismVector } from '../../types/emoji';
 import type {
+  ActiveDyadDto,
   CharacterCategoryDto,
   CharacterImageInfoDto,
   CharacterProfileDto,
   ConversationMessageDto,
   EmojiActionDto,
+  EmotionDerivedDto,
   EmotionStateDto,
   EntityConfigDto,
   InteractionDto,
   MemoryDto,
+  TopEmotionDto,
 } from './EngineApiClient';
 
 const EPOCH = new Date(0);
@@ -126,6 +129,80 @@ export function mapEmojiAction(dto: EmojiActionDto): EmojiAction {
     isDefault: Boolean(dto.is_default),
     createdAt: toDate(dto.created_at),
     updatedAt: toDate(dto.updated_at),
+  };
+}
+
+/** One engine-derived active dyad, camelCase for the app layer. */
+export interface ActiveDyad {
+  keyword: string;
+  type: string;
+  sourceEmotions: string[];
+  sourceIntensities: number[];
+  combinedIntensity: number;
+  description: string;
+}
+
+/** One engine-derived top emotion, camelCase for the app layer. */
+export interface TopEmotion {
+  emotion: string;
+  intensity: number;
+  label: string;
+}
+
+/**
+ * The engine's derived emotional view (A2). The app never recomputes these
+ * values — it only renders them.
+ */
+export interface EmotionDerived {
+  dominantEmotion: string;
+  dominantIntensity: number;
+  intensityLabel: string;
+  intensityLabels: Record<string, string>;
+  activeDyads: ActiveDyad[];
+  topEmotions: TopEmotion[];
+}
+
+function mapActiveDyad(dto: ActiveDyadDto): ActiveDyad {
+  return {
+    keyword: dto.keyword ?? '',
+    type: dto.type ?? '',
+    sourceEmotions: Array.isArray(dto.source_emotions) ? dto.source_emotions : [],
+    sourceIntensities: (Array.isArray(dto.source_intensities) ? dto.source_intensities : []).map(
+      value => toNum(value),
+    ),
+    combinedIntensity: toNum(dto.combined_intensity),
+    description: dto.description ?? '',
+  };
+}
+
+function mapTopEmotion(dto: TopEmotionDto): TopEmotion {
+  return {
+    emotion: dto.emotion ?? '',
+    intensity: toNum(dto.intensity),
+    label: dto.label ?? '',
+  };
+}
+
+/**
+ * Map the derived view. `null` in → `null` out (older engines omit
+ * `emotion_derived` entirely); missing/partial fields degrade to empty values so
+ * a render can never crash on a slimmer payload.
+ */
+export function mapEmotionDerived(
+  dto: EmotionDerivedDto | null | undefined,
+): EmotionDerived | null {
+  if (!dto) return null;
+  const intensityLabels: Record<string, string> = {};
+  for (const [emotion, label] of Object.entries(dto.intensity_labels ?? {})) {
+    if (typeof label === 'string') intensityLabels[emotion] = label;
+  }
+  return {
+    dominantEmotion: dto.dominant_emotion ?? '',
+    dominantIntensity: toNum(dto.dominant_intensity),
+    intensityLabel: dto.intensity_label ?? '',
+    intensityLabels,
+    activeDyads: (dto.active_dyads ?? []).map(mapActiveDyad),
+    topEmotions: (dto.top_emotions ?? []).map(mapTopEmotion),
   };
 }
 
@@ -247,6 +324,10 @@ export function mapCharacterProfile(dto: CharacterProfileDto): CharacterProfile 
     description: dto.description ?? '',
     personality: dto.personality ?? '',
     voice_characteristics: dto.voice_characteristics ?? '',
+    // Engine-derived, read-only. Blank/absent ⇒ `natural` (the engine's own
+    // "blank → natural" rule); an unknown value is passed through verbatim so a
+    // newer engine level is never silently rewritten.
+    vocal_expressiveness: dto.vocal_expressiveness || 'natural',
     base_prompt: dto.base_prompt ?? '',
     scenario: dto.scenario ?? '',
     typing_speed_wpm: toNum(dto.typing_speed_wpm, 60),

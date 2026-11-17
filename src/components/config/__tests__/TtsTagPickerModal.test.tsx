@@ -129,3 +129,71 @@ describe('TtsTagPickerModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('TtsTagPickerModal — kinded sections (Phase 3)', () => {
+  const SECTIONS = [
+    { kind: 'cues', label: 'Cues', tags: ['*whispers*', '*sighs*'] },
+    { kind: 'tones', label: 'Tones', tags: ['*calm*', '*excited*'] },
+    { kind: 'breaks', label: 'Breaks', tags: ['*short pause*'] },
+  ];
+
+  it('renders one header per kind plus that kind’s rows, alphabetically', async () => {
+    const { view } = await renderPicker({ tags: undefined, sections: SECTIONS });
+
+    expect(view.getByTestId('tts-tag-section-cues')).toBeTruthy();
+    expect(view.getByText('Cues · 2')).toBeTruthy();
+    expect(view.getByTestId('tts-tag-section-breaks')).toBeTruthy();
+    expect(view.getByText('Breaks · 1')).toBeTruthy();
+
+    // Rows keep their stable testIDs (asterisks stripped) and sort within the
+    // section, not across sections.
+    const rows = view.getAllByTestId(/^tts-tag-row:/);
+    expect(rows.map((row) => row.props.testID)).toEqual([
+      'tts-tag-row:sighs',
+      'tts-tag-row:whispers',
+      'tts-tag-row:calm',
+      'tts-tag-row:excited',
+      'tts-tag-row:short-pause',
+    ]);
+  });
+
+  it('restricts the list to one kind when kindFilter is set', async () => {
+    const { view } = await renderPicker({
+      tags: undefined,
+      sections: SECTIONS,
+      kindFilter: 'tones',
+    });
+
+    expect(view.getByTestId('tts-tag-section-tones')).toBeTruthy();
+    expect(view.queryByTestId('tts-tag-section-cues')).toBeNull();
+    expect(view.queryByTestId('tts-tag-section-breaks')).toBeNull();
+    expect(view.queryAllByTestId(/^tts-tag-row:/)).toHaveLength(2);
+  });
+
+  it('hides a section whose tags do not match the search', async () => {
+    const { view } = await renderPicker({ tags: undefined, sections: SECTIONS });
+
+    await fireEvent.changeText(view.getByTestId('tts-tag-search'), 'pause');
+
+    expect(view.getByTestId('tts-tag-section-breaks')).toBeTruthy();
+    expect(view.queryByTestId('tts-tag-section-cues')).toBeNull();
+    expect(view.getByTestId('tts-tag-row:short-pause')).toBeTruthy();
+  });
+
+  it('reports the ASTERISK form of a picked row (never a bracketed tag)', async () => {
+    const { view, onPick } = await renderPicker({ tags: undefined, sections: SECTIONS });
+
+    await fireEvent.press(view.getByTestId('tts-tag-row:sighs'));
+
+    expect(onPick).toHaveBeenCalledWith('*sighs*');
+  });
+
+  it('shows the no-match state when no section matches', async () => {
+    const { view } = await renderPicker({ tags: undefined, sections: SECTIONS });
+
+    await fireEvent.changeText(view.getByTestId('tts-tag-search'), 'zzz');
+
+    expect(view.getByTestId('tts-tag-empty')).toBeTruthy();
+    expect(view.queryAllByTestId(/^tts-tag-section-/)).toHaveLength(0);
+  });
+});

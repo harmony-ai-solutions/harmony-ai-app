@@ -31,23 +31,38 @@ import {
 import {
   CONTRACT_FIXTURES,
   FIXTURE_CONTRACT_VERSION,
+  audioTagCapabilitiesChatterboxTurboFixture,
+  audioTagCapabilitiesElevenV3Fixture,
   characterImageInfoFixture,
   characterProfileFixture,
   conversationMessageFixture,
   emojiActionFixture,
+  emotionDerivedFixture,
+  emotionEmptyFixture,
   emotionStateFixture,
   entityConfigFixture,
   interactionFixture,
   memoryFixture,
   moduleConfigOpenCodeGoFixture,
   openCodeGoAccountFixture,
+  providerCapabilitiesAudioTagsFixture,
   providerModelsOpenCodeGoFixture,
+  ragCollectionDetailFixture,
+  ragCollectionStatsFixture,
+  ragCollectionsFixture,
+  ragDocumentDetailsFixture,
+  ragDocumentsFixture,
+  ragGroupsFixture,
+  ragQueryResultFixture,
+  ragTestQueryFixture,
+  ttsSpeechTestFixture,
 } from '../__fixtures__/managementContract.fixtures';
 import {
   mapCharacterImageInfo,
   mapCharacterProfile,
   mapConversationMessage,
   mapEmojiAction,
+  mapEmotionDerived,
   mapEmotionState,
   mapEntityConfig,
   mapInteraction,
@@ -125,6 +140,35 @@ describe('engine contract — mapper conformance against shared fixtures', () =>
     expect(mapped.last_update).toBeInstanceOf(Date);
   });
 
+  it('emotion derived maps the >= 9.0 label, dyads and top-3 emotions', () => {
+    const mapped = mapEmotionDerived(emotionDerivedFixture)!;
+    expect(mapped.dominantEmotion).toBe('joy');
+    expect(mapped.dominantIntensity).toBe(9.4);
+    // The engine's new "overwhelming" bucket must survive the mapping untouched.
+    expect(mapped.intensityLabel).toBe('overwhelming');
+    expect(mapped.intensityLabels.joy).toBe('overwhelming');
+    expect(Object.keys(mapped.intensityLabels)).toHaveLength(8);
+    expect(mapped.activeDyads[0]).toMatchObject({
+      keyword: 'affection',
+      type: 'primary',
+      sourceEmotions: ['joy', 'trust'],
+      sourceIntensities: [9.4, 6.2],
+      combinedIntensity: 15.6,
+    });
+    expect(mapped.activeDyads[0].description).toContain('affection');
+    expect(mapped.topEmotions).toHaveLength(3);
+    expect(mapped.topEmotions[0]).toEqual({
+      emotion: 'joy',
+      intensity: 9.4,
+      label: 'overwhelming',
+    });
+  });
+
+  it('the no-state envelope keeps emotion_derived null', () => {
+    expect(emotionEmptyFixture.emotion_state).toBeNull();
+    expect(emotionEmptyFixture.emotion_derived).toBeNull();
+  });
+
   it('memory maps compaction level + dates', () => {
     const mapped = mapMemory(memoryFixture);
     expect(mapped.compaction_level).toBe(0);
@@ -147,6 +191,8 @@ describe('engine contract — mapper conformance against shared fixtures', () =>
     expect(mapped.name).toBe('Aria');
     expect(mapped.is_favorite).toBe(1);
     expect(mapped.updated_at).toBeInstanceOf(Date);
+    // tts-voice-ux Phase 5 input: the engine-derived level survives the mapping.
+    expect(mapped.vocal_expressiveness).toBe('expressive');
   });
 
   it('character image info maps metadata with an empty byte payload', () => {
@@ -213,6 +259,126 @@ describe('engine contract — OpenCode Go provider shapes (1.12.0)', () => {
     );
     expect(providerModelsOpenCodeGoFixture.error).toBeUndefined();
     expect(CONTRACT_FIXTURES.providerModelsOpenCodeGo).toBe(providerModelsOpenCodeGoFixture);
+  });
+});
+
+describe('engine contract — kinded audio_tags + TTS test echo (tts-voice-ux)', () => {
+  it('ElevenLabs v3 seeds OPEN cues/tones/breaks with the cataloggen counts', () => {
+    expect(audioTagCapabilitiesElevenV3Fixture.syntax).toBe('[{}]');
+    expect(audioTagCapabilitiesElevenV3Fixture.cues).toEqual({
+      mode: 'open',
+      vocabulary: expect.arrayContaining(['laughs', 'sighs', 'clears throat', 'wheezing']),
+    });
+    expect(audioTagCapabilitiesElevenV3Fixture.cues?.vocabulary).toHaveLength(12);
+    expect(audioTagCapabilitiesElevenV3Fixture.tones?.vocabulary).toHaveLength(48);
+    expect(audioTagCapabilitiesElevenV3Fixture.breaks).toEqual({
+      mode: 'open',
+      vocabulary: ['pause', 'long pause', 'short pause'],
+    });
+  });
+
+  it('Chatterbox Turbo seeds CLOSED cue/tonal vocabularies and NO breaks kind', () => {
+    expect(audioTagCapabilitiesChatterboxTurboFixture.cues?.mode).toBe('closed');
+    expect(audioTagCapabilitiesChatterboxTurboFixture.cues?.vocabulary).toHaveLength(9);
+    expect(audioTagCapabilitiesChatterboxTurboFixture.tones?.mode).toBe('closed');
+    expect(audioTagCapabilitiesChatterboxTurboFixture.tones?.vocabulary).toHaveLength(10);
+    // Absent kind ⇒ `none` on the app side; the fixture must not grow one.
+    expect(audioTagCapabilitiesChatterboxTurboFixture).not.toHaveProperty('breaks');
+  });
+
+  it('the catalog row carries audio_tags for tagged models and none for the v2 family', () => {
+    const elevenlabs = providerCapabilitiesAudioTagsFixture.providers?.elevenlabs?.models;
+    expect(elevenlabs?.eleven_v3?.audio_tags).toBe(audioTagCapabilitiesElevenV3Fixture);
+    expect(elevenlabs?.eleven_multilingual_v2).not.toHaveProperty('audio_tags');
+    expect(
+      providerCapabilitiesAudioTagsFixture.providers?.soulbitscloud?.models?.chatterbox_turbo
+        ?.audio_tags,
+    ).toBe(audioTagCapabilitiesChatterboxTurboFixture);
+    expect(CONTRACT_FIXTURES.providerCapabilitiesAudioTags).toBe(
+      providerCapabilitiesAudioTagsFixture,
+    );
+  });
+
+  it('the TTS test response fixture carries input_text + the provider-bound text', () => {
+    expect(ttsSpeechTestFixture.input_text).toBe(
+      '*sighs* Well… *pause* I did not expect that.',
+    );
+    expect(ttsSpeechTestFixture.text).toBe(
+      '[sighs] Well… [short pause] I did not expect that.',
+    );
+    // Boundary syntax only: the INPUT echo is asterisk dialect, never brackets.
+    expect(ttsSpeechTestFixture.input_text).not.toMatch(/\[[^\]]+\]/);
+    expect(CONTRACT_FIXTURES.ttsSpeechTest).toBe(ttsSpeechTestFixture);
+  });
+});
+
+describe('engine contract — RAG collection shapes (camelCase wire keys)', () => {
+  it('collections carry name/documentCount/lastUpdated/embeddingDim', () => {
+    expect(ragCollectionsFixture.collections).toHaveLength(2);
+    expect(ragCollectionsFixture.collections[0]).toEqual({
+      name: 'lore',
+      documentCount: 2,
+      lastUpdated: '2026-11-16T09:00:00Z',
+      embeddingDim: 1536,
+    });
+    // camelCase, never snake_case (Go drops unknown keys silently).
+    expect(ragCollectionsFixture.collections[0]).not.toHaveProperty('document_count');
+    expect(CONTRACT_FIXTURES.ragCollections).toBe(ragCollectionsFixture);
+  });
+
+  it('collection details = {info, stats}; stats keep the nested breakdown maps', () => {
+    expect(ragCollectionDetailFixture.info).toEqual(ragCollectionsFixture.collections[0]);
+    expect(ragCollectionDetailFixture.stats?.archetypeBreakdown).toEqual({
+      character: 1,
+      place: 1,
+    });
+    expect(ragCollectionDetailFixture.stats?.categoryBreakdown).toEqual({
+      character: { bio: 1 },
+      place: { world: 1 },
+    });
+    expect(ragCollectionStatsFixture.embeddingDimension).toBe(1536);
+    expect(CONTRACT_FIXTURES.ragCollectionDetail).toBe(ragCollectionDetailFixture);
+  });
+
+  it('documents carry id/content/metadata/archetype/category/name/createdAt', () => {
+    const doc = ragDocumentsFixture.documents[0];
+    expect(ragDocumentsFixture.total).toBe(ragDocumentsFixture.documents.length);
+    expect(Object.keys(doc).sort()).toEqual(
+      ['archetype', 'category', 'content', 'createdAt', 'id', 'metadata', 'name'].sort(),
+    );
+    expect(doc.createdAt).toBe('2026-11-16T09:00:00Z');
+    expect(doc.metadata).toEqual({ source: 'manual', entry_id: 'lore-1' });
+    // The LIST shape has no embedding vector (details-only field).
+    expect(doc).not.toHaveProperty('embedding');
+    expect(CONTRACT_FIXTURES.ragDocuments).toBe(ragDocumentsFixture);
+  });
+
+  it('document details add the embedding vector (diagnostics only)', () => {
+    expect(ragDocumentDetailsFixture.embedding).toEqual([0.012, -0.034, 0.056]);
+    expect(ragDocumentDetailsFixture.id).toBe(ragDocumentsFixture.documents[0].id);
+    expect(CONTRACT_FIXTURES.ragDocumentDetails).toBe(ragDocumentDetailsFixture);
+  });
+
+  it('test-query results use documentId + similarity', () => {
+    expect(ragTestQueryFixture.query).toBe('who keeps the lighthouse?');
+    expect(ragQueryResultFixture.documentId).toBe('doc-1');
+    expect(ragQueryResultFixture.similarity).toBeCloseTo(0.91);
+    expect(ragQueryResultFixture).not.toHaveProperty('document_id');
+    expect(CONTRACT_FIXTURES.ragTestQuery).toBe(ragTestQueryFixture);
+  });
+
+  it('grouped view carries collectionName/groups/totalDocuments/supported', () => {
+    expect(ragGroupsFixture.collectionName).toBe('lore');
+    expect(ragGroupsFixture.supported).toBe(true);
+    expect(ragGroupsFixture.totalDocuments).toBe(2);
+    expect(ragGroupsFixture.groups.character[0]).toEqual({
+      archetype: 'character',
+      name: 'The lighthouse keeper',
+      documentCount: 1,
+      categories: { bio: 1 },
+      lastUpdated: '2026-11-16T09:00:00Z',
+    });
+    expect(CONTRACT_FIXTURES.ragGroups).toBe(ragGroupsFixture);
   });
 });
 

@@ -126,6 +126,46 @@ describe('EngineApiClient', () => {
     }, async () => ({ ok: true, status: 200, json: async () => ({}) } as unknown as Response));
     await expect(client.listEntities()).rejects.toThrow(/not connected/);
   });
+
+  it('reads the emotion envelope (state + derived) in ONE GET', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/emotion',
+        json: {
+          emotion_state: { entity_id: 'e1', joy_intensity: 9.4 },
+          emotion_derived: {
+            dominant_emotion: 'joy',
+            dominant_intensity: 9.4,
+            intensity_label: 'overwhelming',
+            intensity_labels: { joy: 'overwhelming' },
+            active_dyads: [],
+            top_emotions: [{ emotion: 'joy', intensity: 9.4, label: 'overwhelming' }],
+          },
+        },
+      },
+    ]);
+    const res = await clientWith(server).entityEmotion('e1');
+    expect(server.calls).toHaveLength(1);
+    expect(server.calls[0].path).toBe('/api/entities/e1/emotion');
+    expect(res.emotion_state?.joy_intensity).toBe(9.4);
+    expect(res.emotion_derived?.dominant_emotion).toBe('joy');
+    expect(res.emotion_derived?.intensity_label).toBe('overwhelming');
+    expect(res.emotion_derived?.top_emotions).toHaveLength(1);
+  });
+
+  it('passes an older engine payload (no emotion_derived) through untouched', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/emotion',
+        json: { emotion_state: null },
+      },
+    ]);
+    const res = await clientWith(server).entityEmotion('e1');
+    expect(res.emotion_state).toBeNull();
+    expect(res.emotion_derived).toBeUndefined();
+  });
 });
 
 // ── Cloud-mode provider-config injection (task 2-5) ──────────────────────
@@ -619,6 +659,101 @@ describe('module-config writes are flat', () => {
       provider: 'openai',
       provider_account_id: 'acc1',
       capability_json: { model: 'gpt-4o' },
+    });
+  });
+});
+
+describe('entity RAG collection routes (tts-voice-ux Phase 6)', () => {
+  it('lists collections under the entity-scoped route', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections',
+        json: { collections: [{ name: 'lore', documentCount: 2, lastUpdated: '2026-11-16T09:00:00Z', embeddingDim: 1536 }] },
+      },
+    ]);
+    const res = await clientWith(server).entityRagCollections('e1');
+    expect(res.collections[0].name).toBe('lore');
+    expect(server.lastCall('GET', '/api/entities/e1/rag/collections')).toBeDefined();
+  });
+
+  it('reads info+stats, documents (with filters), one document and groups', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore',
+        json: { info: { name: 'lore' }, stats: { name: 'lore', totalDocuments: 0 } },
+      },
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore/documents',
+        json: { documents: [], total: 0 },
+      },
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore/documents/doc-1',
+        json: { id: 'doc-1', embedding: [0.5] },
+      },
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/lore/groups',
+        json: { collectionName: 'lore', groups: {}, totalDocuments: 0, supported: true },
+      },
+    ]);
+    const client = clientWith(server);
+
+    const detail = await client.entityRagCollection('e1', 'lore');
+    expect(detail.info?.name).toBe('lore');
+    expect(detail.stats?.totalDocuments).toBe(0);
+
+    const docs = await client.entityRagDocuments('e1', 'lore', {
+      archetype: 'character',
+      category: 'bio',
+    });
+    expect(docs.total).toBe(0);
+    const docsCall = server.lastCall('GET', '/api/entities/e1/rag/collections/lore/documents')!;
+    expect(docsCall.query).toEqual({ archetype: 'character', category: 'bio' });
+
+    const doc = await client.entityRagDocument('e1', 'lore', 'doc-1');
+    expect(doc.embedding).toEqual([0.5]);
+
+    const groups = await client.entityRagGroups('e1', 'lore');
+    expect(groups.supported).toBe(true);
+  });
+
+  it('encodes the collection name (path segment) and omits empty filters', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/entities/e1/rag/collections/my%20lore/documents',
+        json: { documents: [], total: 0 },
+      },
+    ]);
+    await clientWith(server).entityRagDocuments('e1', 'my lore');
+    const call = server.lastCall('GET', /\/rag\/collections\/.+\/documents/)!;
+    expect(call.path).toBe('/api/entities/e1/rag/collections/my%20lore/documents');
+    expect(call.query).toEqual({});
+  });
+
+  it('POSTs the similarity test query body', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'POST',
+        path: '/api/entities/e1/rag/collections/lore/test-query',
+        json: { query: 'who keeps the lighthouse?', results: [] },
+      },
+    ]);
+    const res = await clientWith(server).entityRagTestQuery('e1', 'lore', {
+      query: 'who keeps the lighthouse?',
+      limit: 5,
+      archetype: 'character',
+    });
+    expect(res.query).toBe('who keeps the lighthouse?');
+    const call = server.lastCall('POST', '/api/entities/e1/rag/collections/lore/test-query')!;
+    expect(call.body).toEqual({
+      query: 'who keeps the lighthouse?',
+      limit: 5,
+      archetype: 'character',
     });
   });
 });

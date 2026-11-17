@@ -48,6 +48,14 @@ import { AlternateGreetingSwiper, parseAlternateGreetings } from '../components/
 import { EmptyChatCTA } from '../components/chat/EmptyChatCTA';
 import { GreetingBubble } from '../components/chat/GreetingBubble';
 import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat/ScenarioGeneratorSheet';
+import { CharacterStateSheet } from '../components/chat/CharacterStateSheet';
+import { ChatSettingsSheet } from '../components/chat/ChatSettingsSheet';
+import { getEmotionDisplay } from '../components/chat/EmotionBars';
+import { useEmotionState } from '../hooks/useEmotionState';
+import {
+  getShowEmotionState,
+  setShowEmotionState,
+} from '../utils/chatDisplayPrefs';
 import { DayDivider } from '../components/chat/DayDivider';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
 import { useEntitySession } from '../contexts/EntitySessionContext';
@@ -435,6 +443,88 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     () => participantIds.find(id => id !== ownEntityId) ?? null,
     [participantIds, ownEntityId],
   );
+
+  // ── Character state (tts-voice-ux Phase 5) ────────────────────────────────
+  // The header mood chip is OPT-IN via an app-local, per-conversation
+  // preference (no engine change). The combined State | Memories | Knowledge
+  // sheet is reachable from the chip and from chat settings.
+  const [showEmotionState, setShowEmotionStatePref] = useState(false);
+  const [chatSettingsVisible, setChatSettingsVisible] = useState(false);
+  const [stateSheetVisible, setStateSheetVisible] = useState(false);
+
+  // Read the preference whenever the conversation (participantKey) resolves.
+  // The in-memory mirror in chatDisplayPrefs makes the toggle flip instantly.
+  useEffect(() => {
+    let cancelled = false;
+    if (!participantKey) {
+      setShowEmotionStatePref(false);
+      return;
+    }
+    void getShowEmotionState(participantKey).then(value => {
+      if (!cancelled) setShowEmotionStatePref(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [participantKey]);
+
+  const toggleShowEmotionState = useCallback(
+    (enabled: boolean) => {
+      setShowEmotionStatePref(enabled);
+      void setShowEmotionState(participantKey || null, enabled);
+    },
+    [participantKey],
+  );
+
+  // Assistant turns are the only signal the app has that the engine's emotion
+  // vector may have moved (there is no live emotion event) — each completed
+  // assistant turn re-reads the vector while the indicator/sheet is in use.
+  const assistantTurnCount = useMemo(
+    () =>
+      messages.reduce(
+        (count, message) =>
+          message.sender_entity_id !== ownEntityId && !message.deleted_at
+            ? count + 1
+            : count,
+        0,
+      ),
+    [messages, ownEntityId],
+  );
+
+  const {
+    emotion: emotionState,
+    derived: emotionDerived,
+    dominant: dominantEmotion,
+    loading: emotionLoading,
+    error: emotionError,
+    refresh: refreshEmotion,
+  } = useEmotionState(chatEntityId, {
+    enabled: showEmotionState || stateSheetVisible,
+    refreshToken: assistantTurnCount,
+  });
+
+  // Pull-based freshness: re-read on every chat focus (the sheet open and the
+  // assistant-turn bump are handled above / by the hook).
+  useFocusEffect(
+    useCallback(() => {
+      void refreshEmotion();
+    }, [refreshEmotion]),
+  );
+
+  const openCharacterStateSheet = useCallback(() => {
+    hapticLightPress();
+    setStateSheetVisible(true);
+    // Sheet open = refresh (the other triggers are chat focus and each
+    // assistant turn). A pref that is still off flips `enabled` instead, which
+    // the hook already turns into a fetch — one request, never two.
+    void refreshEmotion();
+  }, [refreshEmotion]);
+  const closeCharacterStateSheet = useCallback(() => {
+    setStateSheetVisible(false);
+  }, []);
+  const handleRefreshEmotion = useCallback(() => {
+    void refreshEmotion();
+  }, [refreshEmotion]);
 
   /** Resolved background image + image opacity + scrim opacity for the chat. */
   const [chatBackground, setChatBackground] = useState<{
@@ -2144,6 +2234,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     setPersonaSwitcherVisible(true);
   }, []);
 
+  // Chat settings (tts-voice-ux Phase 5) — per-conversation display options
+  // (the opt-in "Show emotional state" toggle + the character-state entry).
+  const openChatSettings = useCallback(() => {
+    setMenuVisible(false);
+    setChatSettingsVisible(true);
+  }, []);
+
   // Switch the active persona for this chat ('user' = chat as own profile).
   // Persists the global preference, stops the OLD session, and navigates to the
   // persona's OWN thread (thread-per-persona — the participant_key includes the
@@ -2784,6 +2881,13 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
     );
   }, [charName, ownEntityName, theme, t]);
 
+  // Header mood chip (opt-in). Nothing renders until the engine reports an
+  // emotion vector — the chip "appears after the first turn" by design.
+  const moodChipDisplay =
+    showEmotionState && dominantEmotion
+      ? getEmotionDisplay(dominantEmotion.emotion)
+      : null;
+
   return (
     <ThemedView style={styles.container}>
       {!isReadyToShow && (
@@ -2799,7 +2903,8 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         title={headerName}
         onTitlePress={partnerProfileId ? handleOpenPartnerProfile : undefined}
         titleRight={
-          connectionState === 'connected' ? (
+          <View style={styles.titleRightRow}>
+            {connectionState === 'connected' ? (
             <View
               style={styles.statusDotWrap}
               accessibilityRole="image"
@@ -2848,7 +2953,32 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                 style={[styles.statusDot, styles.statusDotOffline]}
               />
             </View>
-          )
+          )}
+
+            {/* Mood chip (opt-in) — tap opens the combined character-state sheet. */}
+            {moodChipDisplay && dominantEmotion ? (
+              <TouchableOpacity
+                onPress={openCharacterStateSheet}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={t('openCharacterState')}
+                testID="chat-mood-chip"
+                style={[
+                  styles.moodChip,
+                  {
+                    borderColor: moodChipDisplay.color + '66',
+                    backgroundColor: moodChipDisplay.color + '1A',
+                  },
+                ]}
+              >
+                <ThemedText size={11} numberOfLines={1}>
+                  {moodChipDisplay.emoji} {t(moodChipDisplay.labelKey)}{' '}
+                  {dominantEmotion.intensity.toFixed(1)}
+                  {dominantEmotion.crystallized ? ' ✦' : ''}
+                </ThemedText>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         }
         onBack={() => navigation.goBack()}
         left={
@@ -2990,6 +3120,40 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                     </ThemedText>
                     <ThemedText variant="muted" size={11}>
                       {t('partnerSettingsCaption', { name: headerName })}
+                    </ThemedText>
+                  </View>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={openChatSettings}
+                  activeOpacity={0.65}
+                  testID="chat-open-settings"
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: theme!.colors.accent.primary + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name="tune-variant"
+                      size={18}
+                      color={theme!.colors.accent.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText size={15} weight="medium">
+                      {t('chatSettings')}
+                    </ThemedText>
+                    <ThemedText variant="muted" size={11}>
+                      {t('chatSettingsCaption', { name: headerName })}
                     </ThemedText>
                   </View>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
@@ -3451,6 +3615,35 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         />
       )}
 
+      {/* Chat settings (tts-voice-ux Phase 5) — per-conversation display
+          options: the opt-in "Show emotional state" toggle + the entry into
+          the combined character-state sheet. */}
+      <ChatSettingsSheet
+        visible={chatSettingsVisible}
+        onClose={() => setChatSettingsVisible(false)}
+        showEmotionState={showEmotionState}
+        onToggleShowEmotionState={toggleShowEmotionState}
+        onOpenCharacterState={openCharacterStateSheet}
+        characterName={headerName}
+      />
+
+      {/* Combined character state — ONE surface: State | Memories | Knowledge.
+          Mounted once; the Memories/Knowledge tabs only fetch when activated. */}
+      <CharacterStateSheet
+        visible={stateSheetVisible}
+        onClose={closeCharacterStateSheet}
+        entityId={chatEntityId}
+        characterName={headerName}
+        avatarUri={partnerAvatar}
+        emotion={emotionState}
+        dominant={dominantEmotion}
+        derived={emotionDerived}
+        emotionLoading={emotionLoading}
+        emotionError={emotionError}
+        onRefreshEmotion={handleRefreshEmotion}
+        vocalExpressiveness={partnerProfile?.vocal_expressiveness}
+      />
+
       {/* Scenario generator bottom sheet (§2-4) — paper Modal+Portal (§A18).
           Generate collapses the sheet and dispatches GENERATE_GREETING /
           START_NEW_SCENARIO (replace vs restart) via handleScenarioGenerate. */}
@@ -3532,6 +3725,18 @@ const styles = StyleSheet.create({
   },
   statusDotWrap: {
     marginLeft: 2,
+  },
+  titleRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  moodChip: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    maxWidth: 132,
   },
   statusDot: {
     width: 10,

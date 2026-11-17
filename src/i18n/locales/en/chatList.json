@@ -48,6 +48,8 @@
   "menuReplyModeRealistic": "Realistic replies",
   "menuMarkRead": "Mark as read",
   "menuMarkUnread": "Mark as unread",
+  "menuShowEmotionState": "Show emotional state",
+  "menuHideEmotionState": "Hide emotional state",
   "menuDisable": "Disable",
   "menuEnable": "Enable",
   "menuDelete": "Delete",

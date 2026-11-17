@@ -240,8 +240,46 @@ export interface EmojiActionsResponseDto {
   emoji_actions: EmojiActionDto[];
 }
 
+/** One engine-derived active emotional dyad (`emotion_derived.active_dyads[]`). */
+export interface ActiveDyadDto {
+  keyword: string;
+  /** `primary` or `secondary` (engine taxonomy). */
+  type: string;
+  source_emotions: string[];
+  source_intensities: number[];
+  combined_intensity: number;
+  description: string;
+}
+
+/** One engine-derived top emotion (`emotion_derived.top_emotions[]`). */
+export interface TopEmotionDto {
+  emotion: string;
+  intensity: number;
+  label: string;
+}
+
+/**
+ * The engine's DERIVED emotional view (A2: the engine is the single source of
+ * truth; the app only renders it). Same wire casing as the rest of the data
+ * layer (snake_case JSON tags on the engine side).
+ */
+export interface EmotionDerivedDto {
+  dominant_emotion: string;
+  dominant_intensity: number;
+  intensity_label: string;
+  /** All 8 Ekman names → their intensity label. */
+  intensity_labels: Record<string, string>;
+  active_dyads: ActiveDyadDto[];
+  top_emotions: TopEmotionDto[];
+}
+
 export interface EmotionResponseDto {
   emotion_state: EmotionStateDto | null;
+  /**
+   * Derived view. Older engines omit the key entirely (and it is `null` when
+   * `emotion_state` is null) — treat absent as `null`.
+   */
+  emotion_derived?: EmotionDerivedDto | null;
 }
 
 export interface MemoriesResponseDto {
@@ -249,6 +287,134 @@ export interface MemoriesResponseDto {
   has_more: boolean;
   next_offset: number | null;
 }
+
+// ── RAG collection browser (Phase 6 of tts-voice-ux) ─────────────────────
+// NOTE: unlike the snake_case data-layer DTOs above, these RAG shapes are
+// **camelCase** on the wire — the engine's `modules/rag/base.go` types carry
+// explicit camelCase JSON tags. Keys must match EXACTLY (Go silently drops
+// unknown keys). Routes: `management/server.go:648-678`.
+
+/** One RAG vector collection (`rag.CollectionInfo`). */
+export interface CollectionInfoDto {
+  name: string;
+  documentCount: number;
+  /** RFC3339 timestamp. */
+  lastUpdated: string;
+  embeddingDim: number;
+}
+
+/** Per-collection breakdown statistics (`rag.CollectionStats`). */
+export interface CollectionStatsDto {
+  name: string;
+  totalDocuments: number;
+  /** archetype → document count. */
+  archetypeBreakdown: Record<string, number>;
+  /** archetype → (category → count). */
+  categoryBreakdown: Record<string, Record<string, number>>;
+  /** document name → count. */
+  nameBreakdown: Record<string, number>;
+  embeddingDimension: number;
+  /** RFC3339 timestamp. */
+  lastUpdated: string;
+}
+
+/** One document in a collection, metadata-only (`rag.DocumentInfo`). */
+export interface DocumentInfoDto {
+  id: string;
+  content: string;
+  metadata: Record<string, string>;
+  archetype: string;
+  category: string;
+  name: string;
+  /** RFC3339 timestamp. */
+  createdAt: string;
+}
+
+/**
+ * Document details (`rag.DocumentDetails`): `DocumentInfo` plus the stored
+ * embedding vector. The vector is for diagnostics only — UI never renders it.
+ */
+export interface DocumentDetailsDto extends DocumentInfoDto {
+  embedding: number[];
+}
+
+/** One similarity-query hit (`rag.QueryResult`). */
+export interface QueryResultDto {
+  documentId: string;
+  content: string;
+  metadata: Record<string, string>;
+  similarity: number;
+  archetype: string;
+  category: string;
+  name: string;
+}
+
+/** One archetype+name group of a grouped collection view (`rag.ArchetypeGroup`). */
+export interface ArchetypeGroupDto {
+  archetype: string;
+  name: string;
+  documentCount: number;
+  /** category → count. */
+  categories: Record<string, number>;
+  /** RFC3339 timestamp. */
+  lastUpdated: string;
+}
+
+/** Grouped collection perspective (`rag.GroupedCollectionView`). */
+export interface GroupedCollectionViewDto {
+  collectionName: string;
+  /** archetype → archetype groups. */
+  groups: Record<string, ArchetypeGroupDto[]>;
+  totalDocuments: number;
+  /** Whether grouped views are supported for this collection. */
+  supported: boolean;
+}
+
+/** `POST /api/entities/:id/rag/collections/:name/test-query` body. */
+export interface TestQueryRequestDto {
+  /** Must be non-empty (the engine requires it). */
+  query: string;
+  /** The engine defaults to 10 when ≤ 0. */
+  limit: number;
+  archetype?: string;
+  category?: string;
+}
+
+/** `GET .../rag/collections` response. */
+export interface RagCollectionsResponseDto {
+  collections: CollectionInfoDto[];
+}
+
+/** `GET .../rag/collections/:name` response (info + statistics). */
+export interface RagCollectionDetailResponseDto {
+  info: CollectionInfoDto | null;
+  stats: CollectionStatsDto | null;
+}
+
+/** `GET .../rag/collections/:name/documents` response (unpaginated). */
+export interface RagDocumentsResponseDto {
+  documents: DocumentInfoDto[];
+  total: number;
+}
+
+/** `POST .../rag/collections/:name/test-query` response. */
+export interface RagTestQueryResponseDto {
+  query: string;
+  results: QueryResultDto[];
+}
+
+/**
+ * Plan-name aliases (`.current_work/tts-voice-ux/6-MemoryAndRagBrowser.md`).
+ * The wire DTOs keep this file's `Dto` suffix convention; these aliases let
+ * consumers use the plan's names verbatim.
+ */
+export type CollectionInfo = CollectionInfoDto;
+export type CollectionStats = CollectionStatsDto;
+export type DocumentInfo = DocumentInfoDto;
+export type DocumentDetails = DocumentDetailsDto;
+export type QueryResult = QueryResultDto;
+export type GroupedCollectionView = GroupedCollectionViewDto;
+export type TestQueryRequest = TestQueryRequestDto;
 
 /**
  * A character profile as returned by `/api/character-profiles` (config DTO).
@@ -277,6 +443,12 @@ export interface CharacterProfileDto {
   card_provenance?: string;
   character_book?: string;
   voice_characteristics?: string;
+  /**
+   * Engine-derived vocal expressiveness level (`subdued|natural|expressive`,
+   * blank ⇒ natural). READ-ONLY in the app: the engine derives it from
+   * personality (owner decision) and marshals it on the profile read.
+   */
+  vocal_expressiveness?: string;
   base_prompt?: string;
   typing_speed_wpm?: number;
   audio_response_chance_percent?: number;
@@ -552,6 +724,36 @@ export interface ProviderModelsResponseDto {
 }
 
 /**
+ * One kind block of the engine's kinded `audio_tags` capability schema
+ * (`config/audio_tags.go:AudioTagKindCapabilities`).
+ *
+ * `mode` is `none` | `closed` | `open`; `vocabulary` lists the kind's words
+ * WITHOUT provider brackets (the engine wraps them with `syntax`). Absent kind
+ * = mode `none`. Loose string types on purpose: the engine owns the enum and
+ * the app folds unknown values to `none` (`modelCapabilities.ts`).
+ */
+export interface AudioTagKindDto {
+  mode?: string;
+  vocabulary?: string[];
+}
+
+/**
+ * The kinded `audio_tags` block of a catalog model
+ * (`config/audio_tags.go:AudioTagCapabilities`, `providers/catalog.go`).
+ *
+ * Present on the wire only for models the engine seeds tags for (Eleven v3/v4
+ * open cues/tones/breaks; Chatterbox Turbo closed cues/tones). Absent block ⇒
+ * every kind is `none` — never fabricate capabilities.
+ */
+export interface AudioTagCapabilitiesDto {
+  /** Provider tag template (`[{}]`) the engine substitutes a cue into. */
+  syntax?: string;
+  cues?: AudioTagKindDto;
+  tones?: AudioTagKindDto;
+  breaks?: AudioTagKindDto;
+}
+
+/**
  * One model entry of the engine's tier-2 catalog
  * (`providers.<type>.models.<modelId>` — `providers/catalog.go:CatalogModel`).
  *
@@ -574,6 +776,12 @@ export interface CatalogModelDto {
   source?: string;
   /** TTS capability tree (operation modes, voices, languages, …). */
   speech_options?: Record<string, unknown>;
+  /**
+   * Kinded audio-tag capability block (cues / tones / breaks ×
+   * `none|closed|open`). Resolved by (provider type, model id) from THIS
+   * tier-2 catalog — live discovery descriptors do not carry it.
+   */
+  audio_tags?: AudioTagCapabilitiesDto;
 }
 
 /**
@@ -731,6 +939,14 @@ export interface TtsSpeechTestResponseDto {
   data?: string;
   audio?: string;
   format?: string;
+  /** The text the engine actually synthesized (user input echo). */
+  input_text?: string;
+  /**
+   * The EXACT provider-bound string (the engine's `*asterisks*` → `[brackets]`
+   * translation, `strings.Join(pieces, " ")`). Display-only: never persist it
+   * into chat text.
+   */
+  text?: string;
   [key: string]: unknown;
 }
 
@@ -1402,6 +1618,91 @@ export class EngineApiClient {
     const q = buildQuery({ limit: opts.limit, offset: opts.offset });
     return this.getJson<MemoriesResponseDto>(
       `/api/entities/${encodeURIComponent(entityId)}/memories${q}`,
+    );
+  }
+
+  // ── Entity RAG collections (read-only browser + similarity test) ────────
+  // Routes: `management/server.go:648-678`; wire shapes are camelCase
+  // (`modules/rag/base.go:145-246`). No write paths here — the browser's v1
+  // scope is read + test-query (editing is deferred).
+
+  /** List an entity's RAG collections (`GET .../rag/collections`). */
+  entityRagCollections(entityId: string): Promise<RagCollectionsResponseDto> {
+    return this.getJson<RagCollectionsResponseDto>(
+      `/api/entities/${encodeURIComponent(entityId)}/rag/collections`,
+    );
+  }
+
+  /** Collection info + statistics (`GET .../rag/collections/:name`). */
+  entityRagCollection(
+    entityId: string,
+    collectionName: string,
+  ): Promise<RagCollectionDetailResponseDto> {
+    return this.getJson<RagCollectionDetailResponseDto>(
+      `/api/entities/${encodeURIComponent(entityId)}/rag/collections/${encodeURIComponent(
+        collectionName,
+      )}`,
+    );
+  }
+
+  /**
+   * Every document of a collection (`GET .../rag/collections/:name/documents`).
+   * The engine returns the FULL list (`total` = `len(documents)`), so no
+   * pagination parameters exist.
+   */
+  entityRagDocuments(
+    entityId: string,
+    collectionName: string,
+    filters: { archetype?: string; category?: string } = {},
+  ): Promise<RagDocumentsResponseDto> {
+    const q = buildQuery({
+      archetype: filters.archetype,
+      category: filters.category,
+    });
+    return this.getJson<RagDocumentsResponseDto>(
+      `/api/entities/${encodeURIComponent(entityId)}/rag/collections/${encodeURIComponent(
+        collectionName,
+      )}/documents${q}`,
+    );
+  }
+
+  /** One document with its embedding vector (`GET .../documents/:docId`). */
+  entityRagDocument(
+    entityId: string,
+    collectionName: string,
+    documentId: string,
+  ): Promise<DocumentDetailsDto> {
+    return this.getJson<DocumentDetailsDto>(
+      `/api/entities/${encodeURIComponent(entityId)}/rag/collections/${encodeURIComponent(
+        collectionName,
+      )}/documents/${encodeURIComponent(documentId)}`,
+    );
+  }
+
+  /** Grouped archetype/name view (`GET .../rag/collections/:name/groups`). */
+  entityRagGroups(
+    entityId: string,
+    collectionName: string,
+  ): Promise<GroupedCollectionViewDto> {
+    return this.getJson<GroupedCollectionViewDto>(
+      `/api/entities/${encodeURIComponent(entityId)}/rag/collections/${encodeURIComponent(
+        collectionName,
+      )}/groups`,
+    );
+  }
+
+  /** Similarity test query (`POST .../rag/collections/:name/test-query`). */
+  entityRagTestQuery(
+    entityId: string,
+    collectionName: string,
+    body: TestQueryRequestDto,
+  ): Promise<RagTestQueryResponseDto> {
+    return this.sendJson<RagTestQueryResponseDto>(
+      'POST',
+      `/api/entities/${encodeURIComponent(entityId)}/rag/collections/${encodeURIComponent(
+        collectionName,
+      )}/test-query`,
+      body,
     );
   }
 

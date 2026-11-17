@@ -234,13 +234,140 @@ export function getSpeechOptions(
   return raw as SpeechOptionsMeta;
 }
 
+// ── Kinded audio-tag capabilities (tts-voice-ux Phase 1) ──────────────────
+//
+// The engine's tier-2 catalog carries a kinded `audio_tags` block per TTS
+// model (`cues` / `tones` / `breaks` × `none | closed | open`). It is resolved
+// by (provider type, model id) from the CATALOG — live discovery descriptors
+// do NOT carry it (they only expose the derived flat `paralinguistic_tags`).
+// Everything here is normalizing-only: a missing kind, an unknown mode or a
+// malformed vocabulary never fabricates a capability.
+
+/** How one kind of audio tag is handled: stripped, whitelisted or open. */
+export type AudioTagMode = 'none' | 'closed' | 'open';
+
+/** The tag kinds of the kinded schema, in display order. */
+export const AUDIO_TAG_KINDS = ['cues', 'tones', 'breaks'] as const;
+export type AudioTagKind = (typeof AUDIO_TAG_KINDS)[number];
+
+/** One normalized kind block: a mode plus its (bracket-free) vocabulary. */
+export interface AudioTagKindCapability {
+  mode: AudioTagMode;
+  vocabulary: string[];
+}
+
+/** The normalized kinded capability block of one TTS model. */
+export interface AudioTagCapabilities {
+  /** Provider tag template (`[{}]`); absent when the wire omits it. */
+  syntax?: string;
+  cues: AudioTagKindCapability;
+  tones: AudioTagKindCapability;
+  breaks: AudioTagKindCapability;
+}
+
+/** A fresh all-`none` block (never share one mutable literal across callers). */
+function emptyAudioTagCapabilities(): AudioTagCapabilities {
+  return {
+    cues: { mode: 'none', vocabulary: [] },
+    tones: { mode: 'none', vocabulary: [] },
+    breaks: { mode: 'none', vocabulary: [] },
+  };
+}
+
+/** Fold any raw mode onto the enum; unknown/absent ⇒ `none`. */
+function normalizeAudioTagMode(raw: unknown): AudioTagMode {
+  if (typeof raw !== 'string') return 'none';
+  const mode = raw.trim().toLowerCase();
+  return mode === 'closed' || mode === 'open' ? mode : 'none';
+}
+
+/** Trimmed, non-empty string entries only (malformed values are dropped). */
+function normalizeAudioTagVocabulary(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const words: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const word = entry.trim();
+    if (word.length > 0) words.push(word);
+  }
+  return words;
+}
+
+function normalizeAudioTagKind(raw: unknown): AudioTagKindCapability {
+  if (!raw || typeof raw !== 'object') return { mode: 'none', vocabulary: [] };
+  const dto = raw as { mode?: unknown; vocabulary?: unknown };
+  return {
+    mode: normalizeAudioTagMode(dto.mode),
+    vocabulary: normalizeAudioTagVocabulary(dto.vocabulary),
+  };
+}
+
+function normalizeAudioTagCapabilities(raw: unknown): AudioTagCapabilities {
+  if (!raw || typeof raw !== 'object') return emptyAudioTagCapabilities();
+  const dto = raw as {
+    syntax?: unknown;
+    cues?: unknown;
+    tones?: unknown;
+    breaks?: unknown;
+  };
+  const capabilities: AudioTagCapabilities = {
+    cues: normalizeAudioTagKind(dto.cues),
+    tones: normalizeAudioTagKind(dto.tones),
+    breaks: normalizeAudioTagKind(dto.breaks),
+  };
+  if (typeof dto.syntax === 'string' && dto.syntax.trim().length > 0) {
+    capabilities.syntax = dto.syntax;
+  }
+  return capabilities;
+}
+
+/**
+ * The normalized kinded capabilities declared by a catalog `ModelInfoDto`
+ * (`meta.audio_tags`). A model with no block — including a live descriptor —
+ * yields all-`none` kinds, never a fabricated list.
+ */
+export function getAudioTagCapabilitiesForModel(
+  model: ModelInfoDto | null | undefined,
+): AudioTagCapabilities {
+  const raw = (model?.meta as Record<string, unknown> | undefined)?.['audio_tags'];
+  return normalizeAudioTagCapabilities(raw);
+}
+
+/**
+ * Resolve the kinded capabilities of (provider type, model id) from the tier-2
+ * catalog the screens already hold (`useProviderCapabilityCatalog().catalog`).
+ * Missing provider/model/row ⇒ all-`none`.
+ */
+export function getAudioTagCapabilities(
+  catalog: Record<string, ModelInfoDto[]> | null | undefined,
+  providerType: string | null | undefined,
+  modelId: string | null | undefined,
+): AudioTagCapabilities {
+  if (!providerType || !modelId) return emptyAudioTagCapabilities();
+  const models = catalog?.[providerType];
+  if (!Array.isArray(models)) return emptyAudioTagCapabilities();
+  return getAudioTagCapabilitiesForModel(findModel(models, modelId));
+}
+
+/**
+ * The LEGACY flat tag list (`meta.speech_options.paralinguistic_tags`) an older
+ * engine still advertises — display fallback only, `[]` when undeclared. The
+ * kinded accessors above are the source of truth when `audio_tags` is present.
+ */
+export function getLegacyTagList(model: ModelInfoDto | null | undefined): string[] {
+  const tags = getSpeechOptions(model)?.paralinguistic_tags;
+  if (!Array.isArray(tags)) return [];
+  return tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0);
+}
+
 /**
  * Resolve the effective TTS `SpeechOptionsMeta` for a provider + model ID,
  * enriching sparse/cached catalog descriptors on `soulbitscloud` and
  * `soulvoice` so the UI always knows whether the model belongs to the
  * OpenVoice/HarmonySpeech family (`speed`/`pitch`/`energy`), the KittenTTS /
- * OpenVoice families (`speed` only) or the Chatterbox family
- * (`exaggeration`, `cfg_weight`, paralinguistic tags, sampling params).
+ * OpenVoice families (`speed` only) or the Chatterbox family (`exaggeration`,
+ * `cfg_weight`, sampling params). Capabilities the engine owns (flat
+ * `paralinguistic_tags`, kinded `audio_tags`) are NEVER synthesized here.
  *
  * The family fallbacks mirror HSE's `prepare_*_inputs` exactly
  * (research/soulbits-model-defaults.md §0/§7): the worker **raises** on
@@ -268,13 +395,10 @@ export function resolveEffectiveSpeechOptions(
       ...declared,
       supports_voice_cloning: true,
       operation_modes: declared?.operation_modes ?? ['single_speaker_tts', 'voice_cloning'],
-      paralinguistic_tags: declared?.paralinguistic_tags ?? [
-        '[laughter]',
-        '[sigh]',
-        '[gasp]',
-        '[chuckle]',
-        '[clears throat]',
-      ],
+      // NO tag fallback: the engine de-tagged Chatterbox base/multilingual
+      // (they have no tag tokens) and publishes the kinded `audio_tags` block
+      // for Turbo. A flat `paralinguistic_tags` list only comes from the wire
+      // (`...declared` above) — never fabricate capabilities.
       supported_generation_params: turbo
         ? // Turbo raises on exaggeration/cfg_weight/min_p — norm_loudness is
           // its one exposed knob (upstream default: on).

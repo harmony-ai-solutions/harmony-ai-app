@@ -20,21 +20,28 @@
  */
 
 import type {
+  AudioTagCapabilitiesDto,
   ChatListRowDto,
   CharacterImageInfoDto,
   CharacterProfileDto,
   CharacterStatsResponseDto,
   CloudAccountStatusDto,
   CloudSignInStartDto,
+  CollectionInfoDto,
+  CollectionStatsDto,
   ConversationMessageDto,
+  DocumentDetailsDto,
+  DocumentInfoDto,
   ElevenLabsVoiceCloneResponseDto,
   ElevenLabsVoiceDesignResponseDto,
   EmojiActionDto,
   EmojiActionsResponseDto,
+  EmotionDerivedDto,
   EmotionResponseDto,
   EmotionStateDto,
   EngineLogEntryDto,
   EntityConfigDto,
+  GroupedCollectionViewDto,
   InteractionDto,
   InteractionsResponseDto,
   MemoriesResponseDto,
@@ -46,6 +53,11 @@ import type {
   ProviderModelsResponseDto,
   ProviderVerifyResultDto,
   ProviderWriteResponseDto,
+  QueryResultDto,
+  RagCollectionDetailResponseDto,
+  RagCollectionsResponseDto,
+  RagDocumentsResponseDto,
+  RagTestQueryResponseDto,
   SpeakerEmbeddingResponseDto,
   SyncClientStatusDto,
   SyncGroupKeyStatusDto,
@@ -164,6 +176,50 @@ export const emotionStateFixture: EmotionStateDto = {
   crystallize_min_hours: 24,
 };
 
+/**
+ * The engine's derived emotional view (A2). `intensity_label` carries the new
+ * `>= 9.0 → "overwhelming"` string from the engine's `IntensityLabel()`; the
+ * `intensity_labels` map covers all 8 Ekman names.
+ */
+export const emotionDerivedFixture: EmotionDerivedDto = {
+  dominant_emotion: 'joy',
+  dominant_intensity: 9.4,
+  intensity_label: 'overwhelming',
+  intensity_labels: {
+    joy: 'overwhelming',
+    sadness: 'neutral',
+    trust: 'intense',
+    disgust: 'neutral',
+    fear: 'neutral',
+    anger: 'neutral',
+    surprise: 'neutral',
+    anticipation: 'moderate',
+  },
+  active_dyads: [
+    {
+      keyword: 'affection',
+      type: 'primary',
+      source_emotions: ['joy', 'trust'],
+      source_intensities: [9.4, 6.2],
+      combined_intensity: 15.6,
+      description: 'a warm sense of affection blooms in your heart',
+    },
+    {
+      keyword: 'excitement',
+      type: 'primary',
+      source_emotions: ['joy', 'anticipation'],
+      source_intensities: [9.4, 4.8],
+      combined_intensity: 14.2,
+      description: 'excitement bubbles up within you',
+    },
+  ],
+  top_emotions: [
+    { emotion: 'joy', intensity: 9.4, label: 'overwhelming' },
+    { emotion: 'trust', intensity: 6.2, label: 'intense' },
+    { emotion: 'anticipation', intensity: 4.8, label: 'moderate' },
+  ],
+};
+
 export const memoryFixture: MemoryDto = {
   id: 'mem-1',
   entity_id: 'ent-1',
@@ -198,6 +254,7 @@ export const characterProfileFixture: CharacterProfileDto = {
   card_provenance: '{}',
   character_book: '{}',
   voice_characteristics: '',
+  vocal_expressiveness: 'expressive',
   base_prompt: '',
   typing_speed_wpm: 60,
   audio_response_chance_percent: 50,
@@ -411,6 +468,13 @@ const emojiActionsFixture: EmojiActionsResponseDto = {
 
 const emotionFixture: EmotionResponseDto = {
   emotion_state: emotionStateFixture,
+  emotion_derived: emotionDerivedFixture,
+};
+
+/** No live state: both keys present, both null. */
+export const emotionEmptyFixture: EmotionResponseDto = {
+  emotion_state: null,
+  emotion_derived: null,
 };
 
 const memoriesPageFixture: MemoriesResponseDto = {
@@ -658,6 +722,189 @@ const providerCapabilitiesFixture: ProviderCapabilitiesDto = {
   },
 };
 
+/**
+ * The kinded `audio_tags` block of ElevenLabs v3/v4 as the engine's catalog
+ * seeds it (`providers/catalog_data.json`: 12 cues / 48 tones / 3 breaks, all
+ * OPEN). Mirrors the engine's `cataloggen` count test so a drift in either
+ * vocab shows up as a fixture diff.
+ */
+export const audioTagCapabilitiesElevenV3Fixture: AudioTagCapabilitiesDto = {
+  syntax: '[{}]',
+  cues: {
+    mode: 'open',
+    vocabulary: [
+      'laughs',
+      'chuckles',
+      'giggles',
+      'sighs',
+      'gasps',
+      'groaning',
+      'coughing',
+      'clears throat',
+      'snorts',
+      'exhales',
+      'gulps',
+      'wheezing',
+    ],
+  },
+  tones: {
+    mode: 'open',
+    vocabulary: [
+      'excited',
+      'sad',
+      'happy',
+      'curious',
+      'sarcastic',
+      'whispers',
+      'playful',
+      'amazed',
+      'powerful',
+      'proud',
+      'optimistic',
+      'startled',
+      'mad',
+      'aggressive',
+      'bitter',
+      'critical',
+      'repelled',
+      'anxious',
+      'stressed',
+      'scared',
+      'threatened',
+      'vulnerable',
+      'confused',
+      'busy',
+      'tired',
+      'bored',
+      'distant',
+      'despair',
+      'let down',
+      'peaceful',
+      'content',
+      'thoughtful',
+      'trusting',
+      'shouts',
+      'whispering',
+      'dramatic',
+      'deadpan',
+      'softly',
+      'quietly',
+      'nervous',
+      'hesitant',
+      'worried',
+      'upset',
+      'sorrowful',
+      'angry',
+      'cheerfully',
+      'awed',
+      'elated',
+    ],
+  },
+  breaks: {
+    mode: 'open',
+    vocabulary: ['pause', 'long pause', 'short pause'],
+  },
+};
+
+/**
+ * The kinded `audio_tags` block of Chatterbox Turbo: CLOSED cue/tonal
+ * vocabularies (9 + 10) and NO breaks kind (absent ⇒ `none`). Both providers
+ * (`soulbitscloud`, `soulvoice`) seed the same block.
+ */
+export const audioTagCapabilitiesChatterboxTurboFixture: AudioTagCapabilitiesDto = {
+  syntax: '[{}]',
+  cues: {
+    mode: 'closed',
+    vocabulary: [
+      'laugh',
+      'chuckle',
+      'sigh',
+      'gasp',
+      'groan',
+      'cough',
+      'clear throat',
+      'sniff',
+      'shush',
+    ],
+  },
+  tones: {
+    mode: 'closed',
+    vocabulary: [
+      'angry',
+      'fear',
+      'surprised',
+      'whispering',
+      'advertisement',
+      'dramatic',
+      'narration',
+      'crying',
+      'happy',
+      'sarcastic',
+    ],
+  },
+};
+
+/**
+ * A tier-2 catalog slice carrying `audio_tags` rows, PLUS a tag-free row for
+ * none-state assertions. Consumed by the capability accessor / conformance
+ * tests of Phases 2-3 (additive on top of {@link providerCapabilitiesFixture}).
+ */
+export const providerCapabilitiesAudioTagsFixture: ProviderCapabilitiesDto = {
+  providers: {
+    elevenlabs: {
+      models: {
+        eleven_v3: {
+          label: 'Eleven v3',
+          family: 'eleven_v3',
+          modalities: ['text', 'audio'],
+          capabilities: ['text_to_speech'],
+          speech_options: {
+            operation_modes: ['single_speaker_tts'],
+            paralinguistic_tags: ['[laughs]', '[sighs]', '[pause]'],
+            supported_generation_params: ['stability', 'style', 'seed'],
+            supports_voice_cloning: true,
+          },
+          audio_tags: audioTagCapabilitiesElevenV3Fixture,
+          status: 'current',
+          source: 'curated',
+        },
+        eleven_multilingual_v2: {
+          label: 'Eleven Multilingual v2',
+          family: 'eleven_multilingual',
+          modalities: ['text', 'audio'],
+          capabilities: ['text_to_speech'],
+          speech_options: {
+            operation_modes: ['single_speaker_tts'],
+            // The de-tagged v2 family: speaks tags aloud, so it declares NO
+            // kinded block and an EMPTY flat list.
+            paralinguistic_tags: [],
+            supported_generation_params: ['stability', 'style'],
+          },
+          status: 'current',
+          source: 'curated',
+        },
+      },
+    },
+    soulbitscloud: {
+      models: {
+        chatterbox_turbo: {
+          label: 'Chatterbox Turbo',
+          family: 'chatterbox',
+          modalities: ['text', 'audio'],
+          capabilities: ['text_to_speech'],
+          speech_options: {
+            operation_modes: ['single_speaker_tts', 'voice_cloning'],
+            supports_voice_cloning: true,
+          },
+          audio_tags: audioTagCapabilitiesChatterboxTurboFixture,
+          status: 'current',
+          source: 'curated',
+        },
+      },
+    },
+  },
+};
+
 const characterStatsFixture: CharacterStatsResponseDto = {
   stats: { 'ent-1': { likes: 3, chats: 5 } },
 };
@@ -675,6 +922,10 @@ export const ttsSpeechTestFixture: TtsSpeechTestResponseDto = {
   status: 'success',
   audio_base64: 'UklGRg==',
   format: 'audio/mpeg',
+  // tts-voice-ux Phase 3: the engine echoes the input and the EXACT
+  // provider-bound string (`*asterisks*` → `[brackets]`).
+  input_text: '*sighs* Well… *pause* I did not expect that.',
+  text: '[sighs] Well… [short pause] I did not expect that.',
 };
 
 export const elevenLabsVoiceCloneFixture: ElevenLabsVoiceCloneResponseDto = {
@@ -696,6 +947,116 @@ export const elevenLabsVoiceDesignFixture: ElevenLabsVoiceDesignResponseDto = {
     ],
     text: 'Hello there',
   },
+};
+
+// ── RAG collection browser (tts-voice-ux Phase 6) ──────────────────────────
+// Mirrors `modules/rag/base.go:145-246` EXACTLY (camelCase JSON keys) and the
+// route envelopes of `management/server.go:648-678` / `routes_rag.go`.
+// `embedding` is deliberately small but present: the detail sheet must never
+// render it, it only reports `embeddingDim`.
+
+export const ragCollectionLoreFixture: CollectionInfoDto = {
+  name: 'lore',
+  documentCount: 2,
+  lastUpdated: '2026-11-16T09:00:00Z',
+  embeddingDim: 1536,
+};
+
+export const ragCollectionChatHistoryFixture: CollectionInfoDto = {
+  name: 'chat_history',
+  documentCount: 64,
+  lastUpdated: '2026-11-17T08:30:00Z',
+  embeddingDim: 1536,
+};
+
+export const ragCollectionsFixture: RagCollectionsResponseDto = {
+  collections: [ragCollectionLoreFixture, ragCollectionChatHistoryFixture],
+};
+
+export const ragCollectionStatsFixture: CollectionStatsDto = {
+  name: 'lore',
+  totalDocuments: 2,
+  archetypeBreakdown: { character: 1, place: 1 },
+  categoryBreakdown: { character: { bio: 1 }, place: { world: 1 } },
+  nameBreakdown: { 'The lighthouse keeper': 1, 'Harbor lighthouse': 1 },
+  embeddingDimension: 1536,
+  lastUpdated: '2026-11-16T09:00:00Z',
+};
+
+export const ragCollectionDetailFixture: RagCollectionDetailResponseDto = {
+  info: ragCollectionLoreFixture,
+  stats: ragCollectionStatsFixture,
+};
+
+export const ragDocumentLighthouseFixture: DocumentInfoDto = {
+  id: 'doc-1',
+  content: 'The lighthouse keeper has watched the harbor for thirty years.',
+  metadata: { source: 'manual', entry_id: 'lore-1' },
+  archetype: 'character',
+  category: 'bio',
+  name: 'The lighthouse keeper',
+  createdAt: '2026-11-16T09:00:00Z',
+};
+
+export const ragDocumentHarborFixture: DocumentInfoDto = {
+  id: 'doc-2',
+  content: 'The harbor freezes over in late December.',
+  metadata: { source: 'manual' },
+  archetype: 'place',
+  category: 'world',
+  name: 'Harbor lighthouse',
+  createdAt: '2026-11-16T09:05:00Z',
+};
+
+export const ragDocumentsFixture: RagDocumentsResponseDto = {
+  documents: [ragDocumentLighthouseFixture, ragDocumentHarborFixture],
+  total: 2,
+};
+
+export const ragDocumentDetailsFixture: DocumentDetailsDto = {
+  ...ragDocumentLighthouseFixture,
+  embedding: [0.012, -0.034, 0.056],
+};
+
+export const ragQueryResultFixture: QueryResultDto = {
+  documentId: 'doc-1',
+  content: 'The lighthouse keeper has watched the harbor for thirty years.',
+  metadata: { source: 'manual', entry_id: 'lore-1' },
+  similarity: 0.91,
+  archetype: 'character',
+  category: 'bio',
+  name: 'The lighthouse keeper',
+};
+
+export const ragTestQueryFixture: RagTestQueryResponseDto = {
+  query: 'who keeps the lighthouse?',
+  results: [ragQueryResultFixture],
+};
+
+export const ragGroupsFixture: GroupedCollectionViewDto = {
+  collectionName: 'lore',
+  groups: {
+    character: [
+      {
+        archetype: 'character',
+        name: 'The lighthouse keeper',
+        documentCount: 1,
+        categories: { bio: 1 },
+        lastUpdated: '2026-11-16T09:00:00Z',
+      },
+    ],
+    place: [
+      {
+        archetype: 'place',
+        name: 'Harbor lighthouse',
+        documentCount: 1,
+        categories: { world: 1 },
+        lastUpdated: '2026-11-16T09:05:00Z',
+      },
+    ],
+  },
+  totalDocuments: 2,
+  supported: true,
 };
 
 const backupTargetsFixture = {
@@ -767,6 +1128,8 @@ export const CONTRACT_FIXTURES: Record<string, unknown> = {
   emojiActions: emojiActionsFixture,
   emotion: emotionFixture,
   emotionState: emotionStateFixture,
+  emotionDerived: emotionDerivedFixture,
+  emotionEmpty: emotionEmptyFixture,
   memory: memoryFixture,
   memoriesPage: memoriesPageFixture,
   characterProfile: characterProfileFixture,
@@ -787,10 +1150,20 @@ export const CONTRACT_FIXTURES: Record<string, unknown> = {
   providerVerify: providerVerifyFixture,
   providerModels: providerModelsFixture,
   providerCapabilities: providerCapabilitiesFixture,
+  providerCapabilitiesAudioTags: providerCapabilitiesAudioTagsFixture,
+  audioTagCapabilitiesElevenV3: audioTagCapabilitiesElevenV3Fixture,
+  audioTagCapabilitiesChatterboxTurbo: audioTagCapabilitiesChatterboxTurboFixture,
   speakerEmbedding: speakerEmbeddingFixture,
   ttsSpeechTest: ttsSpeechTestFixture,
   elevenLabsVoiceClone: elevenLabsVoiceCloneFixture,
   elevenLabsVoiceDesign: elevenLabsVoiceDesignFixture,
+  ragCollections: ragCollectionsFixture,
+  ragCollectionDetail: ragCollectionDetailFixture,
+  ragCollectionStats: ragCollectionStatsFixture,
+  ragDocuments: ragDocumentsFixture,
+  ragDocumentDetails: ragDocumentDetailsFixture,
+  ragTestQuery: ragTestQueryFixture,
+  ragGroups: ragGroupsFixture,
   syncClientStatus: syncClientStatusFixture,
   syncGroupKeyStatus: syncGroupKeyStatusFixture,
   lanPairingPayload: lanPairingPayloadFixture,

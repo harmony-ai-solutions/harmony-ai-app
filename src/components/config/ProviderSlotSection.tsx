@@ -44,12 +44,19 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useProviderModels } from '../../hooks/useProviderModels';
 import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityCatalog';
 import {
+  AUDIO_TAG_KINDS,
   catalogModelsForModule,
   findModel,
   resolveEffectiveSpeechOptions,
+  getAudioTagCapabilities,
+  getLegacyTagList,
+  getSpeechOptions,
   isSamplingParamKey,
   isParamSupported,
   partitionFieldsBySupport,
+  type AudioTagCapabilities,
+  type AudioTagKind,
+  type AudioTagMode,
   type SpeechOptionsMeta,
 } from '../../constants/modelCapabilities';
 import {
@@ -74,6 +81,18 @@ const VOICE_CLONE_PROVIDERS = ['soulbitscloud', 'soulvoice', 'elevenlabs'];
 
 /** TTS providers that get the model-gated Language + Base Voice dropdowns. */
 const SOUL_TTS_PROVIDERS = ['soulbitscloud', 'soulvoice'];
+
+/**
+ * ElevenLabs models that are officially TAG-FREE: they have no audio-tag
+ * capabilities and SPEAK any bracket tag aloud. They must never be offered an
+ * accent (an accent is injected at the TTS boundary as a tag). The kinded
+ * capability check already excludes them; this deny-list is the explicit belt
+ * (owner-locked: never offer accents on these two).
+ */
+const TAG_FREE_ELEVEN_MODELS = ['eleven_multilingual_v2', 'eleven_turbo_v2_5'];
+
+/** ElevenLabs model families whose delivery guides are READ ALOUD (v2 line). */
+const ELEVEN_V2_FAMILY = /v2(_|$)|turbo_v2/;
 
 /*
  * TTS Language / Base Voice options are ONLY ever derived from the selected
@@ -291,6 +310,37 @@ export function normalizeTtsLanguageOptions(
 }
 
 /**
+ * Normalize a model's `speech_options.accents` — the ENGINE-SEEDED display
+ * words an ElevenLabs v3/v4 voice can carry (e.g. `"British accent"`).
+ *
+ * The wire value is the tag WORD without provider brackets, because the engine
+ * injects it as a start tag at the TTS boundary (brackets are boundary syntax
+ * only). A stray `[British accent]` / `*British accent*` wrapper from an older
+ * engine is unwrapped so the picker never shows — let alone teaches — bracket
+ * syntax. Absent/empty ⇒ `[]`; the caller then shows NO picker (never
+ * fabricate a list).
+ */
+export function normalizeTtsAccentOptions(
+  accents: unknown,
+): Array<{ id: string; name: string }> {
+  if (!Array.isArray(accents)) return [];
+  const seen = new Set<string>();
+  const options: Array<{ id: string; name: string }> = [];
+  for (const entry of accents) {
+    if (typeof entry !== 'string') continue;
+    const word = entry
+      .trim()
+      .replace(/^[[\]*]+/, '')
+      .replace(/[[\]*]+$/, '')
+      .trim();
+    if (word === '' || seen.has(word)) continue;
+    seen.add(word);
+    options.push({ id: word, name: word });
+  }
+  return options;
+}
+
+/**
  * Normalize a model's selectable voices into `{id, name}` picker options,
  * tolerant of every declared shape:
  *  - flat strings (`soulbitscloud` gateway — present only when the model
@@ -429,6 +479,36 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
     modelModuleType === 'tts'
       ? resolveEffectiveSpeechOptions(selectedModel, currentModelId, state.providerType)
       : null;
+
+  // ── Kinded audio-tag capabilities (tts-voice-ux Phase 2) ──
+  // Resolved from the TIER-2 catalog by (providerType, modelId): live discovery
+  // descriptors carry only the derived flat `paralinguistic_tags`, never
+  // `audio_tags`. Everything here is normalizing-only — a model with no block
+  // (or a tag-free one) yields all-`none` kinds, never a fabricated list.
+  const catalogModelRow = findModel(catalog[state.providerType], currentModelId);
+  const audioTagCapabilities: AudioTagCapabilities = getAudioTagCapabilities(
+    catalog,
+    state.providerType,
+    currentModelId,
+  );
+  const activeTagKinds = AUDIO_TAG_KINDS.filter(
+    (kind) => audioTagCapabilities[kind].mode !== 'none',
+  );
+  const hasAudioTagKinds = activeTagKinds.length > 0;
+  /**
+   * The LEGACY flat tag list (`speech_options.paralinguistic_tags`) — display
+   * fallback only, for an older engine that has no kinded block yet. The
+   * catalog row is authoritative; the live descriptor is the fallback source
+   * when the catalog is sparse.
+   */
+  const legacyTagList = (() => {
+    const fromCatalog = getLegacyTagList(catalogModelRow);
+    if (fromCatalog.length > 0) return fromCatalog;
+    const fromDescriptor = speechOptions?.paralinguistic_tags;
+    return Array.isArray(fromDescriptor)
+      ? fromDescriptor.filter((tag): tag is string => typeof tag === 'string' && tag.trim() !== '')
+      : [];
+  })();
 
   const isTts = modelModuleType === 'tts';
   const isSoulTts = isTts && SOUL_TTS_PROVIDERS.includes(state.providerType);
@@ -929,18 +1009,22 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
     state.capability.voice_id ??
     '';
 
-  // ── TTS: Language + Base Voice dropdowns (soulbitscloud / soulvoice) ──
+  // ── TTS: Language + Base Voice + Accent (tts-voice-ux Phase 4) ──
   //
-  // Both rows are gated on DECLARED metadata (research §0/§3/§7):
+  // Every row is gated on DECLARED metadata (research §0/§3/§7):
   //  - Language renders only when the model declares `speech_options.languages`.
   //    A single declared language is the only one the worker accepts
   //    (KittenTTS: `default`) → a read-only locked row instead of a control
-  //    that can hard-fail synthesis.
+  //    that can hard-fail synthesis. Chatterbox Multilingual keeps this picker.
   //  - Base Voice renders only when the model declares voices (flat `voices[]`
   //    or `languages[].voices` scoped by the selected language). Models with
   //    no voice ids but a cloning pipeline (chatterbox / harmonyspeech) get a
   //    muted hint instead; models with neither get no row at all.
-  const renderTtsVoiceAndLanguage = () => {
+  //  - Accent is ELEVENLABS v3/v4 ONLY, sourced from `speech_options.accents`
+  //    (engine-seeded display words) and bound to `capability.accent`, which
+  //    the engine injects ONCE per utterance as a start tag. A tag-free model
+  //    (v2 family) would SPEAK the tag aloud, so it never gets the picker.
+  const renderLanguageAndAccent = () => {
     // A value saved while the descriptor bug was live can be the literal
     // "[object Object]" string (the old picker's option ids were
     // `String(languageObject)`); render that as unset instead of keeping it
@@ -1045,17 +1129,119 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
       </View>
     ) : null;
 
-    if (!languageBlock && !voiceBlock) return null;
-    if (!languageBlock || !voiceBlock) {
-      // A lone row keeps full width instead of sitting in a half-empty column.
-      return <View style={styles.fieldWrap}>{languageBlock ?? voiceBlock}</View>;
+    // ── Accent (ElevenLabs v3/v4 only) ──────────────────────────────────
+    // The value is the tag WORD ("British accent") — never a bracketed tag:
+    // brackets exist only at the TTS boundary, and the display deliberately
+    // shows the plain human-readable word (no `[British accent]` teaching).
+    const accentValue = cleanPickerValue(String(state.capability.accent ?? ''));
+    const accentCapable =
+      isElevenLabsTts &&
+      hasAudioTagKinds &&
+      !TAG_FREE_ELEVEN_MODELS.includes(String(currentModelId).toLowerCase());
+    const declaredAccents = normalizeTtsAccentOptions(speechOptions?.accents);
+    const accentOptions =
+      declaredAccents.length > 0
+        ? // The live descriptor is authoritative when it declares a list…
+          declaredAccents
+        : // …otherwise fall back to the tier-2 catalog row for this model.
+          normalizeTtsAccentOptions(getSpeechOptions(catalogModelRow)?.accents);
+    // A saved value the list omits stays visible as-is (same rule as
+    // languages/voices) — never silently cleared.
+    const accentList = [...accentOptions];
+    if (accentValue && !accentList.some((option) => option.id === accentValue)) {
+      accentList.push({ id: accentValue, name: accentValue });
     }
-    return (
-      <View style={styles.twoColRow}>
-        {languageBlock}
-        {voiceBlock}
-      </View>
-    );
+
+    let accentBlock: React.ReactNode = null;
+    if (isElevenLabsTts) {
+      if (!accentCapable) {
+        // A stored accent on a tag-free model would be SPOKEN ALOUD: show the
+        // stored value read-only with the reason, and no picker.
+        accentBlock = accentValue ? (
+          <View testID={`tts-accent-locked-${slot}`} style={styles.halfCol}>
+            <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
+              {t('accent')}
+            </ThemedText>
+            <View
+              accessibilityLabel={`${t('accent')}: ${accentValue}`}
+              accessibilityState={{ disabled: true }}
+              style={[
+                styles.lockedRow,
+                {
+                  borderColor: theme.colors.border.default,
+                  backgroundColor: theme.colors.background.base,
+                },
+              ]}
+            >
+              <ThemedText size={13.5} numberOfLines={1} style={styles.lockedRowText}>
+                {accentValue}
+              </ThemedText>
+              <Icon name="lock-outline" size={14} color={theme.colors.text.muted} />
+            </View>
+            <ThemedText variant="muted" size={11} style={styles.hint}>
+              {t('accentLocked')}
+            </ThemedText>
+          </View>
+        ) : null;
+      } else if (accentOptions.length === 0) {
+        // Declared-metadata-only rule: no seeded list ⇒ no picker, just the
+        // honest reason (never fabricate an accent vocabulary).
+        accentBlock = (
+          <View testID={`tts-accent-none-${slot}`} style={styles.halfCol}>
+            <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
+              {t('accent')}
+            </ThemedText>
+            <ThemedText variant="muted" size={12} style={styles.hint}>
+              {t('accentNoneHint')}
+            </ThemedText>
+          </View>
+        );
+      } else {
+        accentBlock = (
+          <View testID={`tts-accent-picker-${slot}`} style={styles.halfCol}>
+            <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
+              {t('accent')}
+            </ThemedText>
+            <SelectPicker
+              label={t('accent')}
+              value={accentValue}
+              options={accentList}
+              onChange={(value) => onCapabilityChange('accent', value)}
+              placeholder={t('accent')}
+            />
+            <ThemedText variant="muted" size={11} style={styles.hint}>
+              {t('accentBoundaryHint')}
+            </ThemedText>
+          </View>
+        );
+      }
+    }
+
+    const rows: React.ReactNode[] = [];
+    if (languageBlock && voiceBlock) {
+      rows.push(
+        <View key="language-voice" style={styles.twoColRow}>
+          {languageBlock}
+          {voiceBlock}
+        </View>,
+      );
+    } else if (languageBlock || voiceBlock) {
+      // A lone row keeps full width instead of sitting in a half-empty column.
+      rows.push(
+        <View key="language-voice" style={styles.fieldWrap}>
+          {languageBlock ?? voiceBlock}
+        </View>,
+      );
+    }
+    if (accentBlock) {
+      rows.push(
+        <View key="accent" style={styles.fieldWrap}>
+          {accentBlock}
+        </View>,
+      );
+    }
+    if (rows.length === 0) return null;
+    return <>{rows}</>;
   };
 
   /**
@@ -1083,6 +1269,165 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
         <ThemedText size={12} style={[styles.noticeText, { color: theme.colors.status.warning }]}>
           {t('ttsEmbeddingRequiredNotice')}
         </ThemedText>
+      </View>
+    );
+  };
+
+  // ── Voice expression: what the selected voice can actually DO (Phase 2) ──
+  //
+  // Three kind cards (cues / tones / breaks), each with its mode and its
+  // vocabulary size, resolved from the tier-2 catalog. This replaces the old
+  // Chatterbox-only flat tag pills, which advertised a stale 5-tag list on
+  // models the engine has de-tagged (base/multilingual chatterbox have NO tag
+  // tokens). The Chatterbox prosody SLIDERS are untouched (4b below).
+  //
+  // States:
+  //  - kinds enabled → kind cards + the asterisk-boundary hint
+  //  - no kinds, legacy flat list → ONE legacy "Supported tags · N" row
+  //  - no kinds, no list → the none-state (stripped, never read aloud) plus the
+  //    v2-family warning (EL v2 models officially SPEAK delivery guides)
+  // Only providers/families where audio tags are meaningful render the block.
+  const showVoiceExpression = () => {
+    if (!isTts || !currentModelId) return false;
+    if (hasAudioTagKinds || legacyTagList.length > 0) return true;
+    if (isElevenLabsTts || isSoulTts) return true;
+    // Another provider whose catalog row explicitly declares the block (even
+    // if every kind currently resolves to `none`) — the syntax field is the
+    // only trace a normalizer keeps of a present-but-empty block.
+    return audioTagCapabilities.syntax !== undefined;
+  };
+
+  const renderVoiceExpression = () => {
+    if (!showVoiceExpression()) return null;
+
+    const kindLabel = (kind: AudioTagKind): string =>
+      t(kind === 'cues' ? 'tagKindCues' : kind === 'tones' ? 'tagKindTones' : 'tagKindBreaks');
+    const modeLabel = (mode: AudioTagMode): string =>
+      t(mode === 'open' ? 'tagModeOpen' : mode === 'closed' ? 'tagModeClosed' : 'tagModeNone');
+    const modeColor = (mode: AudioTagMode): string =>
+      mode === 'open'
+        ? '#38BDF8' // cyan — accepts arbitrary nonverbal spans
+        : mode === 'closed'
+          ? theme.colors.accent.primary // purple — fixed whitelist
+          : theme.colors.text.muted;
+
+    const tagCount = (kind: AudioTagKind): number =>
+      audioTagCapabilities[kind].vocabulary.length;
+
+    return (
+      <View style={styles.prosodyBlock} testID={`tts-voice-expression-${slot}`}>
+        <View style={styles.modelLabelRow}>
+          <ThemedText size={12} variant="secondary" weight="medium">
+            {t('voiceExpressionTitle')}
+          </ThemedText>
+        </View>
+
+        {hasAudioTagKinds ? (
+          <>
+            <View style={styles.kindGrid}>
+              {activeTagKinds.map((kind) => {
+                const mode = audioTagCapabilities[kind].mode;
+                const label = kindLabel(kind);
+                const count = tagCount(kind);
+                return (
+                  <View
+                    key={kind}
+                    testID={`tts-tag-kind-${slot}-${kind}`}
+                    accessibilityRole="text"
+                    accessibilityLabel={`${label}, ${modeLabel(mode)}, ${count}`}
+                    style={[
+                      styles.kindCard,
+                      {
+                        borderColor: theme.colors.border.default,
+                        backgroundColor: theme.colors.background.base,
+                      },
+                    ]}
+                  >
+                    <ThemedText size={11.5} weight="medium" numberOfLines={1}>
+                      {`${label} · ${count}`}
+                    </ThemedText>
+                    <View
+                      style={[
+                        styles.metaBadge,
+                        {
+                          borderColor: modeColor(mode) + '66',
+                          backgroundColor: modeColor(mode) + '1A',
+                          alignSelf: 'flex-start',
+                        },
+                      ]}
+                    >
+                      <ThemedText size={9.5} weight="medium" style={{ color: modeColor(mode) }}>
+                        {modeLabel(mode)}
+                      </ThemedText>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+            <ThemedText variant="muted" size={11}>
+              {t('audioTagsBoundaryHint')}
+            </ThemedText>
+          </>
+        ) : legacyTagList.length > 0 ? (
+          // Old engine: a FLAT list only. Show its size, never invented kinds.
+          <View
+            testID={`tts-legacy-audio-tags-${slot}`}
+            accessibilityRole="text"
+            accessibilityLabel={`${t('audioTagsLegacyTitle', {
+              count: legacyTagList.length,
+            })}. ${t('audioTagsLegacyHint')}`}
+            style={[
+              styles.noticeRow,
+              {
+                borderColor: theme.colors.border.default,
+                backgroundColor: theme.colors.background.base,
+              },
+            ]}
+          >
+            <Icon name="tag-multiple-outline" size={15} color={theme.colors.text.muted} />
+            <View style={{ flex: 1 }}>
+              <ThemedText size={12} weight="medium">
+                {t('audioTagsLegacyTitle', { count: legacyTagList.length })}
+              </ThemedText>
+              <ThemedText variant="muted" size={11}>
+                {t('audioTagsLegacyHint')}
+              </ThemedText>
+            </View>
+          </View>
+        ) : (
+          <View
+            testID="tts-no-audio-tags"
+            accessibilityRole="text"
+            accessibilityLabel={t('audioTagsNoneHint')}
+            style={[
+              styles.noticeRow,
+              {
+                borderColor: theme.colors.border.default,
+                backgroundColor: theme.colors.background.base,
+              },
+            ]}
+          >
+            <Icon
+              name="information-outline"
+              size={15}
+              color={theme.colors.text.muted}
+            />
+            <View style={{ flex: 1 }}>
+              <ThemedText variant="muted" size={11.5}>
+                {t('audioTagsNoneHint')}
+              </ThemedText>
+              {isElevenLabsTts && ELEVEN_V2_FAMILY.test(String(currentModelId).toLowerCase()) ? (
+                <ThemedText
+                  size={11}
+                  style={[styles.hint, { color: theme.colors.status.warning }]}
+                  testID={`tts-audio-tags-v2-warning-${slot}`}
+                >
+                  {t('audioTagsV2Warning')}
+                </ThemedText>
+              ) : null}
+            </View>
+          </View>
+        )}
       </View>
     );
   };
@@ -1132,12 +1477,6 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
       const chatterboxPairFields = hasChatterbox
         ? remaining.filter((f) => f.key === 'exaggeration' || f.key === 'cfg_weight')
         : [];
-      const paralinguisticTags =
-        speechOptions?.paralinguistic_tags && speechOptions.paralinguistic_tags.length > 0
-          ? speechOptions.paralinguistic_tags
-          : hasChatterbox
-            ? ['[laughter]', '[sigh]', '[gasp]', '[chuckle]', '[clears throat]']
-            : [];
 
       const afterProsodyRemaining = remaining.filter((f) => {
         if (hasOpenVoiceTrio && openVoiceTrioKeys.includes(f.key)) return false;
@@ -1168,6 +1507,9 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
           {/* 1b — HarmonySpeech needs an embedding: explain before the workflow */}
           {renderEmbeddingRequiredNotice()}
 
+          {/* 2b — Voice expression: cues / tones / breaks the voice supports */}
+          {renderVoiceExpression()}
+
           {/* 2 — Voice cloning / design workflows, immediately below the model */}
           {showVoiceClone && (
             <VoiceCloneAndDesignSection
@@ -1180,8 +1522,8 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
             />
           )}
 
-          {/* 3 — Voice + language pickers */}
-          {isSoulTts && renderTtsVoiceAndLanguage()}
+          {/* 3 — Voice + language + accent pickers */}
+          {(isSoulTts || isElevenLabsTts) && renderLanguageAndAccent()}
           {isElevenLabsTts &&
             supportedFields
               .filter((f) => f.key === 'voice_id')
@@ -1220,7 +1562,8 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
             </View>
           )}
 
-          {/* 4b — Chatterbox Expressivity & Prosody + Paralinguistic Tag Pills */}
+          {/* 4b — Chatterbox Expressivity & Prosody (sliders only: the flat tag
+              pills are replaced by the kinded "Voice expression" block above) */}
           {hasChatterbox && (
             <View style={styles.prosodyBlock}>
               <View style={styles.modelLabelRow}>
@@ -1246,22 +1589,6 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
                 </View>
               </View>
               {renderFieldRows(chatterboxPairFields, `${slot}-cb`)}
-              {paralinguisticTags.length > 0 && (
-                <View style={styles.fieldWrap}>
-                  <ThemedText size={12} variant="secondary" style={styles.fieldLabel}>
-                    Paralinguistic Tags (supported inline in utterances)
-                  </ThemedText>
-                  <View style={styles.tagPillRow}>
-                    {paralinguisticTags.map((tag) => (
-                      <View key={tag} style={styles.tagPill}>
-                        <ThemedText size={10.5} style={styles.tagPillText}>
-                          {tag}
-                        </ThemedText>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
             </View>
           )}
 
@@ -1497,18 +1824,18 @@ const styles = StyleSheet.create({
   threeColRow: { flexDirection: 'row', gap: 8 },
   thirdCol: { flex: 1 },
   prosodyBlock: { gap: 8, marginTop: 2 },
-  tagPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tagPill: {
-    borderRadius: 6,
+  // Voice expression kind cards (cues / tones / breaks): an auto-fitting row,
+  // matching the threeColRow conventions above without a fixed column count.
+  kindGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  kindCard: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 92,
     borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.35)',
-    backgroundColor: 'rgba(168, 85, 247, 0.16)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  tagPillText: {
-    color: '#E9D5FF',
-    fontFamily: 'monospace',
+    borderRadius: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    gap: 5,
   },
   footerDivider: {
     borderTopWidth: 1,
