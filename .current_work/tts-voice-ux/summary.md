@@ -2,7 +2,7 @@
 
 Plan folder: `.current_work/tts-voice-ux/` (app repo, harmony-ai-app)
 Created: 2026-11-17
-Status: **design agreed with owner; plan docs committed 2026-11-17; implementation not started**
+Status: **Phases 1-7 implemented 2026-11-17 (reviewed in main thread, all changes uncommitted); plan docs committed 2026-11-17 as `dbea152`**
 Companion engine plan: `harmony-link-private/.current_work/audio-tags/` (Phases 1-9
 committed as `03a416a`); its optional Phase 6 (`6-AppCatalogSurface.md`) is the
 sketch this plan expands. That engine doc is left untouched on purpose (no new
@@ -113,13 +113,42 @@ of that is visible in the app yet. This plan:
 
 ## Implementation Status
 
-- [ ] **Phase 1: Catalog Data Plumbing** ([1-CatalogDataPlumbing.md](1-CatalogDataPlumbing.md))
-- [ ] **Phase 2: Capability Display** ([2-CapabilityDisplay.md](2-CapabilityDisplay.md))
-- [ ] **Phase 3: Test Studio Pickers** ([3-TestStudioPickers.md](3-TestStudioPickers.md))
-- [ ] **Phase 4: Language & Accent** ([4-LanguageAndAccent.md](4-LanguageAndAccent.md))
-- [ ] **Phase 5: Character State & Emotion** ([5-CharacterStateAndEmotion.md](5-CharacterStateAndEmotion.md))
-- [ ] **Phase 6: Memory & RAG Browser** ([6-MemoryAndRagBrowser.md](6-MemoryAndRagBrowser.md))
-- [ ] **Phase 7: i18n, Tests & Docs** ([7-I18nTestsAndDocs.md](7-I18nTestsAndDocs.md))
+- [x] **Phase 1: Catalog Data Plumbing** ([1-CatalogDataPlumbing.md](1-CatalogDataPlumbing.md))
+- [x] **Phase 2: Capability Display** ([2-CapabilityDisplay.md](2-CapabilityDisplay.md))
+- [x] **Phase 3: Test Studio Pickers** ([3-TestStudioPickers.md](3-TestStudioPickers.md))
+- [x] **Phase 4: Language & Accent** ([4-LanguageAndAccent.md](4-LanguageAndAccent.md))
+- [x] **Phase 5: Character State & Emotion** ([5-CharacterStateAndEmotion.md](5-CharacterStateAndEmotion.md))
+- [x] **Phase 6: Memory & RAG Browser** ([6-MemoryAndRagBrowser.md](6-MemoryAndRagBrowser.md))
+- [x] **Phase 7: i18n, Tests & Docs** ([7-I18nTestsAndDocs.md](7-I18nTestsAndDocs.md))
+
+## Implementation notes (2026-11-17, main-thread review)
+
+Deviations from the phase documents — all reported by the implementing agents
+and verified here; NO locked decision changed:
+
+- `4-LanguageAndAccent.md` suggested the accent picker may display
+  `[British accent]`; implemented as plain words only (locked decision 2:
+  single visible dialect, asterisks).
+- `vocal_expressiveness` is propagated through `mapCharacterProfile` → local
+  `CharacterProfile` (the phase doc named only the DTO); without it the
+  read-only card cannot read the value. The model field is optional so
+  `createCharacterProfile` call sites keep compiling.
+- Engine accents are DERIVED in `cataloggen` from one canonical Go list
+  (`config/accents.go`), not hand-seeded in `curated.json`. The start tag is a
+  space-separated chunk at the head of the first synthesis piece — a separate
+  `RenderPieces` entry would issue a second provider request.
+- `CharacterStateSheet` uses the RN `Modal` convention (paper `Modal`/`Portal`
+  breaks the existing `ChatDetailScreen` test harnesses).
+- Memories tab ships compaction-level filters instead of the mockup's free-text
+  search; Knowledge filters are client-side (documents are unpaginated).
+- The chat-list parity toggle is wired from `ChatListScreen` AND
+  `settings/ArchivedChatsScreen` (both render `ChatConversationMenuModal`).
+- Full `ChatListScreen` render tests remain infeasible (RN 0.86 core lazy-getters
+  crash the node env); the parity toggle is covered at the modal boundary.
+
+Verification: `tsc --noEmit` clean; `jest --selectProjects unit --runInBand`
+= 247 suites / 2611 tests passed; engine `gen-model-catalog -check` green and
+`go test ./... -count=1` green (47 packages). Nothing committed or pushed.
 
 ## Engine companions (small; both repos tested)
 

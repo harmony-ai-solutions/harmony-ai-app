@@ -1,5 +1,20 @@
 # Testing Strategy
 
+> **UPDATE (2026-11-17, voice & context UX):** the `.current_work/tts-voice-ux/`
+> plan (Phases 1-7) added data-layer suites (`modelCapabilities`,
+> `useProviderCapabilityCatalog`, `EngineApiClient`, `engineApiMappers`,
+> `engineContractConformance`, `engineRepositories`), config-UI suites
+> (`ProviderSlotSection`, `TtsTestPanel`, `TtsTagPickerModal`,
+> `ttsVoiceOptions`) and chat-UI suites (`chatDisplayPrefs`, `useEmotionState`,
+> `EmotionBars`, `CharacterStateSheet`, `ChatSettingsSheet`, `MemoriesTab`,
+> `KnowledgeTab`, `DocumentDetailsSheet`, `ChatConversationMenuModal`,
+> `chatDetailCharacterState`). Current baseline: **247 unit suites / 2611 tests**
+> (single `unit` project). The jest process still exits 1 with teardown noise
+> ("Jest did not exit one second after the test run has completed") — judge by
+> `Test Suites: N passed`, not the exit code. Prefer `--runInBand`: the full
+> suite with 45 workers has known `chatDetail*` timeout flakes. RNTL v14
+> `render`/`fireEvent` return Promises — await them.
+
 > **UPDATE (2026-10-23, cloud engine-key ensure):** the `soulbitscloud` engine
 > credential moved from the ≤1h account PASETO to a long-lived `sb_cloud_*` API
 > key named "Soulbits Engine". New suite

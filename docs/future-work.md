@@ -430,3 +430,38 @@ Connected" retry noise shows up in connection logs again.
 **Source**: Chat connection cascade incident 2026-08-05 (adb logcat + docker
 logs). node_modules edits are not allowed in this repo (no patch-package), so
 the fix must land upstream.
+
+---
+
+### 25. Voice & Context UX — deferred follow-ups
+
+**Description**: Items deliberately left out of the `.current_work/tts-voice-ux/`
+plan (Phases 1-7 implemented 2026-11-17, uncommitted):
+
+- **Live emotional-state updates** — the "Character state" sheet is pull-based
+  (`GET /api/entities/:id/emotion` on focus / sheet open / after each assistant
+  turn) and always stamped "as of". There is no engine sync event for emotion
+  state in the app. v2 could publish an update event and switch to push.
+- **RAG collection write paths** — the engine already exposes `PUT`/`DELETE`
+  document and group routes; the v1 Knowledge browser is read-only +
+  `test-query`. Editing/deleting knowledge from the app is deferred.
+- **Accent Option B** — the owner confirmed Option A (full engine companion for
+  runtime chat + test route). Option B (test-studio-only) is documented in
+  `4-LanguageAndAccent.md` for reference and is NOT implemented.
+- **Engine rollout** — `speech_options.accents` + the start-tag injection only
+  take effect once the engine companion is built into the running engine;
+  older engines show the honest "no accent options" state.
+- **Full-screen `ChatListScreen` render tests** — RN 0.86 core lazy-getters crash
+  the node test env for this screen (documented in
+  `src/screens/__tests__/ChatListScreen.test.tsx`); the chat-list parity toggle
+  is covered at the `ChatConversationMenuModal` boundary instead.
+
+**Why it matters**: keeps the v1 surface honest (no fabricated realtime state,
+no fabricated vocabularies, no write paths without a product decision).
+
+**Effort**: 2-5 days depending on whether the engine sync event is included.
+
+**Trigger**: user requests live emotion updates or in-app knowledge editing;
+engine release carrying the accent companion.
+
+**Source**: `.current_work/tts-voice-ux/summary.md` + phase files.
