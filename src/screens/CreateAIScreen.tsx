@@ -16,7 +16,7 @@
  * single source for default configuration.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -173,6 +173,14 @@ import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
 import { formatModuleConfigSubtitle } from '../components/entities/EntityModuleSelector';
+import { ContextSizeAdvisory } from '../components/config/ContextSizeAdvisory';
+import {
+  CONTEXT_SIZE_DEFAULT,
+  CONTEXT_WINDOW_CAPABILITY_KEY,
+  parseCapabilityJson,
+  readContextWindow,
+  resolveContextSize,
+} from '../utils/contextSize';
 import { filterModuleConfigsForVariant } from '../services/variant/providerAvailability';
 import { invalidateEntityAccessCache } from '../services/variant/entityAccess';
 import { hexToRgba } from '../utils/colorUtils';
@@ -239,6 +247,8 @@ import {
   getAllImaginationConfigs,
   getAllMovementConfigs,
   getAllBackendConfigs,
+  updateBackendConfig,
+  updateCognitionConfig,
 } from '../database/repositories';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
@@ -340,6 +350,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [backendConfigs, setBackendConfigs] = useState<ModuleConfigOption[]>([]);
   // null = loading, false = loaded but empty, true = has at least one
   const [hasAnyConfigs, setHasAnyConfigs] = useState<boolean | null>(null);
+  // Raw backend/cognition rows (kept for the cross-slot context-window
+  // advisory: each row's capability overlay carries its `context_window`).
+  const [moduleRows, setModuleRows] = useState<{
+    backend: Array<Record<string, any>>;
+    cognition: Array<Record<string, any>>;
+  }>({ backend: [], cognition: [] });
+  // In-flight "Align" write of the context windows.
+  const [aligningContext, setAligningContext] = useState(false);
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
@@ -449,6 +467,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         getAllMovementConfigs(),
         getAllBackendConfigs(),
       ]);
+      // Keep the raw rows: the cross-slot context-window advisory reads each
+      // config's capability overlay (`context_window`), which the picker
+      // options drop when they collapse to id/name/subtitle.
+      setModuleRows({
+        backend: (backend ?? []) as unknown as Array<Record<string, any>>,
+        cognition: (cognition ?? []) as unknown as Array<Record<string, any>>,
+      });
       // Variant-aware picker options (plan 7-14 V3): a store build only offers
       // configs wired exclusively to the available provider (soulbitscloud), so
       // the entity editor can never wire a locked provider. Full = unchanged.
@@ -514,6 +539,81 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       loadModuleConfigs();
     }, [loadModuleConfigs]),
   );
+
+  // ── Cross-slot context window (backend vs cognition) ────────────────────────
+  // The two LLM slots each carry a `context_window` in their capability JSON
+  // (`ContextSizeSelect`). Replies can never outgrow the BACKEND window and
+  // memory compaction follows the same point, so a larger cognition window is
+  // misleading. The advisory below is non-blocking and silent unless BOTH slots
+  // are configured and backend < cognition.
+  //
+  // The effective value is the configured window (default Small 8K when the
+  // slot was never edited). Model maxima are not re-resolved here: the control
+  // already clamps a value to the selected model's max and persists that, so
+  // the stored window IS the effective one.
+  const findContextRow = useCallback(
+    (moduleType: 'backend' | 'cognition', id: string) => {
+      if (!id) return undefined;
+      return moduleRows[moduleType].find((row) => String(row.id) === id);
+    },
+    [moduleRows],
+  );
+
+  const contextWindowPair = useMemo(() => {
+    const backendRow = findContextRow('backend', backendConfigId);
+    const cognitionRow = findContextRow('cognition', cognitionConfigId);
+    if (!backendRow || !cognitionRow) return null;
+    return {
+      backend: resolveContextSize(readContextWindow(backendRow.capability_json)).tokens,
+      cognition: resolveContextSize(readContextWindow(cognitionRow.capability_json)).tokens,
+    };
+  }, [findContextRow, backendConfigId, cognitionConfigId]);
+
+  /**
+   * "Align" — write the backend's window into BOTH configs (a full-row update
+   * preserving every module scalar; only the capability overlay changes), then
+   * reload the pickers so the advisory clears. Non-blocking: a failure alerts
+   * and leaves both configs untouched except for whichever write landed.
+   */
+  const handleAlignContextWindows = useCallback(async () => {
+    if (!contextWindowPair) return;
+    const backendRow = findContextRow('backend', backendConfigId);
+    const cognitionRow = findContextRow('cognition', cognitionConfigId);
+    if (!backendRow || !cognitionRow) return;
+    const target = contextWindowPair.backend;
+    // Same persistence convention as the control: the default preset is the
+    // "unset" state, so an aligned default removes the key from both overlays.
+    const withWindow = (row: Record<string, any>) => {
+      const overlay = { ...parseCapabilityJson(row.capability_json) };
+      if (target === CONTEXT_SIZE_DEFAULT) {
+        delete overlay[CONTEXT_WINDOW_CAPABILITY_KEY];
+      } else {
+        overlay[CONTEXT_WINDOW_CAPABILITY_KEY] = target;
+      }
+      return { ...row, capability_json: JSON.stringify(overlay) };
+    };
+    setAligningContext(true);
+    try {
+      await Promise.all([
+        updateBackendConfig(withWindow(backendRow) as any),
+        updateCognitionConfig(withWindow(cognitionRow) as any),
+      ]);
+      await loadModuleConfigs();
+    } catch (err) {
+      log.error('Failed to align context windows:', err);
+      showAlert(t('common:error'), t('contextAdvisoryAlignFailed'));
+    } finally {
+      setAligningContext(false);
+    }
+  }, [
+    contextWindowPair,
+    findContextRow,
+    backendConfigId,
+    cognitionConfigId,
+    loadModuleConfigs,
+    showAlert,
+    t,
+  ]);
 
   // ── Prefill from an existing profile (route param prefillProfileId) ─────────
   useEffect(() => {
@@ -2171,6 +2271,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   onChange={setCognitionConfigId}
                   isLoading={hasAnyConfigs === null}
                   entityId={editEntityId ?? undefined}
+                />
+
+                {/* Cross-slot context-window advisory (silent unless the
+                    backend window is the smaller of the two). Non-blocking:
+                    "Align" lowers both configs to the backend's window. */}
+                <ContextSizeAdvisory
+                  backendTokens={contextWindowPair?.backend}
+                  cognitionTokens={contextWindowPair?.cognition}
+                  onAlign={() => {
+                    handleAlignContextWindows();
+                  }}
+                  busy={aligningContext}
                 />
 
                 <EntityModuleSelectorWithActions

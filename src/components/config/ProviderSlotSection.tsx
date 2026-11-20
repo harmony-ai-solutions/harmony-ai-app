@@ -33,6 +33,11 @@ import { ThemedText } from '../themed/ThemedText';
 import { FormField } from './FormField';
 import { AccountPicker } from './AccountPicker';
 import { CatalogModelSelect } from './CatalogModelSelect';
+import {
+  ContextSizeSelect,
+  isContextSizeModuleType,
+  type ContextSizeModuleType,
+} from './ContextSizeSelect';
 import { VoicePicker } from './VoicePicker';
 import { SelectPicker } from './SelectPicker';
 import { SoulbitsModelSelect } from './SoulbitsModelSelect';
@@ -67,6 +72,10 @@ import {
 import type { FieldDefinition } from '../../constants/providerFieldSchemas';
 import { isSimpleFieldKey } from '../../constants/moduleConfigVisibility';
 import { hapticLightPress } from '../../utils/haptics';
+import {
+  CONTEXT_SIZE_DEFAULT,
+  CONTEXT_WINDOW_CAPABILITY_KEY,
+} from '../../utils/contextSize';
 import type { ProviderOption } from '../../constants/moduleConfiguration';
 import type { ProviderAccount } from '../../database/models';
 
@@ -1432,6 +1441,18 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
     );
   };
 
+  // ── Context window (LLM chat slots only) ──────────────────────────────
+  // Backend / Cognition / Movement capability cards get the ContextSizeSelect
+  // control directly under the model picker + its chips — in Simple AND
+  // Advanced mode (it is an essential choice, not a deep technical knob).
+  const isContextSizeSlot = isContextSizeModuleType(modelModuleType);
+  const contextModelField = isContextSizeSlot
+    ? supportedFields.find((field) => field.key === capabilityModelKey)
+    : undefined;
+  const contextRemainingFields = contextModelField
+    ? supportedFields.filter((field) => field !== contextModelField)
+    : supportedFields;
+
   // ── Capability body: TTS gets the design's exact top-to-bottom order ──
   const renderCapabilityContent = () => {
     if (modelModuleType === 'tts') {
@@ -1686,6 +1707,31 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
               supportedFields.filter((f) => f.key !== 'model'),
               slot,
             )}
+          </>
+        ) : isContextSizeSlot ? (
+          <>
+            {contextModelField
+              ? renderFieldRows([contextModelField], `${slot}-model`)
+              : null}
+            <ContextSizeSelect
+              moduleType={modelModuleType as ContextSizeModuleType}
+              value={
+                typeof state.capability[CONTEXT_WINDOW_CAPABILITY_KEY] === 'number'
+                  ? state.capability[CONTEXT_WINDOW_CAPABILITY_KEY]
+                  : undefined
+              }
+              onChange={(tokens) =>
+                // The default preset is the documented "unset" state — omit
+                // the key so an untouched slot persists no overlay value.
+                onCapabilityChange(
+                  CONTEXT_WINDOW_CAPABILITY_KEY,
+                  tokens === CONTEXT_SIZE_DEFAULT ? undefined : tokens,
+                )
+              }
+              modelMax={selectedModel?.context}
+              modelLabel={selectedModel?.label ?? (currentModelId || undefined)}
+            />
+            {renderFieldRows(contextRemainingFields, slot)}
           </>
         ) : (
           renderFieldRows(supportedFields, slot)

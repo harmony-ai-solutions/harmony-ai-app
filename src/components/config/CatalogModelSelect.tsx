@@ -29,6 +29,7 @@ import { useKeyboardAwareFocus } from '../themed/KeyboardAwareScrollView';
 import { SelectPicker } from './SelectPicker';
 import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityCatalog';
 import { catalogModelsForModule, findModel } from '../../constants/modelCapabilities';
+import { formatTokenCount } from '../../utils/contextSize';
 import type { ModelInfoDto } from '../../services/engine/EngineApiClient';
 
 /** Sentinel option id for the "Custom…" row (never a real model id). */
@@ -51,16 +52,12 @@ export function modelProvenanceChipTestId(modelId: string): string {
 /**
  * Format a context-window token count for the note chip, e.g. 128000 → "128K",
  * 1050000 → "1.05M", 8192 → "8.2K".
+ *
+ * The implementation lives in `utils/contextSize` (shared with
+ * `ContextSizeSelect`); this alias keeps the existing chip call site and its
+ * tests unchanged.
  */
-export function formatContextWindow(context: number): string {
-  if (context >= 1_000_000) {
-    return `${(context / 1_000_000).toFixed(2).replace(/\.?0+$/, '')}M`;
-  }
-  if (context >= 1_000) {
-    return `${(context / 1_000).toFixed(1).replace(/\.?0+$/, '')}K`;
-  }
-  return String(context);
-}
+export const formatContextWindow = formatTokenCount;
 
 interface CatalogModelSelectProps {
   providerType: string;

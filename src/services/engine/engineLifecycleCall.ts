@@ -81,7 +81,15 @@ export interface BatchRequestPayload {
   priority?: string;
   degraded?: boolean;
   modelName?: string;
-  contextWindowSize?: number;
+  /**
+   * The COGNITION slot's effective window (tokens). The engine's compaction
+   * threshold is 80% of min(cognition, backend) — see `backendContextWindowSize`.
+   * Neither key is populated by the app today; the engine falls back to the
+   * module configs' effective windows when they are absent.
+   */
+  cognitionContextWindowSize?: number;
+  /** The BACKEND slot's effective window (tokens) — the model that consumes the reply prompt. */
+  backendContextWindowSize?: number;
 }
 
 /** The `lifecycle.maintenance` request payload. */
